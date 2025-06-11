@@ -3,12 +3,10 @@ services:
     build: .
     image: goodreads-collage
     ports:
-      - "8000:8000"
+      - "8000:5000"
     environment:
       - GOODREADS_RSS_URL=https://www.goodreads.com/review/list_rss/5672051?shelf=read
     volumes:
       - ./goodreads_cache:/app/rss_cache
       - ./covers:/app/covers
       - ./collages:/app/collages
-      # maybe not required
-      # - ./NotoColorEmoji.ttf:/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf
