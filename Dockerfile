@@ -39,5 +39,5 @@ RUN touch /var/log/cron.log
 EXPOSE 5000
 
 # Run the app 
-CMD cron && python /app/server.py
+CMD python /app/app.py && cron && python /app/server.py
 
