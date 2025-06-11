@@ -9,7 +9,8 @@ from dateutil import parser as date_parser  # Add to requirements.txt
 from calendar import monthrange
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 import PIL
-import subprocess
+from collections import defaultdict
+
 
 # Configuration
 FEED_URL = os.getenv("GOODREADS_RSS_URL", "https://www.goodreads.com/review/list_rss/5672051?shelf=read")
@@ -58,6 +59,20 @@ def parse_feed(file_path):
     root = tree.getroot()
     return root.findall("channel/item")
 
+def group_books_by_month(items):
+    books_by_month = defaultdict(list)
+    for item in items:
+        user_read_at = item.findtext("user_read_at")
+        if not user_read_at:
+            continue
+        try:
+            read_date = date_parser.parse(user_read_at).replace(tzinfo=None)
+        except Exception:
+            continue
+        year, month = read_date.year, read_date.month
+        books_by_month[(year, month)].append(item)
+    return books_by_month
+
 def get_books_read_last_month(items):
     now = datetime.now()
     first_of_this_month = datetime(now.year, now.month, 1)
@@ -104,7 +119,7 @@ def download_cover_if_missing(item):
     else:
         print(f"Cover for '{book_title}' (ID: {book_id}) already exists.")
 
-def create_collage(books):
+def create_collage(books, year, month):
     canvas_width, canvas_height = 1080, 1920
     margin = 20
     padding = 30
@@ -216,10 +231,22 @@ def create_collage(books):
         # Foreground
         draw.text((title_x, title_y), title_text, font=title_font, fill="white")
 
+    # Add header title
+    header_text = f"{datetime(year, month, 1).strftime('%B')} Reads"
+    header_font_size = 48
+    try:
+        header_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=header_font_size)
+    except Exception:
+        header_font = ImageFont.load_default()
+
+    header_bbox = draw.textbbox((0, 0), header_text, font=header_font)
+    header_w = header_bbox[2] - header_bbox[0]
+    header_x = (canvas_width - header_w) // 2
+    draw.text((header_x + 1, margin + 1), header_text, font=header_font, fill="black")
+    draw.text((header_x, margin), header_text, font=header_font, fill="white")
+
     # Save the collage with YYYY-MM.jpg format for last month
-    now = datetime.utcnow()
-    last_month = now.replace(day=1) - timedelta(days=1)
-    collage_filename = f"{last_month.strftime('%Y-%m')}.jpg"
+    collage_filename = f"{year:04d}-{month:02d}.jpg"
     output_path = Path("collages") / collage_filename
     output_path.parent.mkdir(exist_ok=True)
 
@@ -231,14 +258,27 @@ def create_collage(books):
 # Run logic
 if __name__ == "__main__":
     feed_file = get_feed()
-
     items = parse_feed(feed_file)
     print(f"Feed file: {feed_file}")
 
-    books_last_month = get_books_read_last_month(items)
+    books_by_month = group_books_by_month(items)
 
-    print(f"Found {len(books_last_month)} books read last month.")
-    for book in books_last_month:
-        download_cover_if_missing(book)
+    all_books = [book for books in books_by_month.values() for book in books]
+    print(f"Total books with read dates: {len(all_books)}")
 
-    create_collage(books_last_month)
+    # Download covers (once per book)
+    seen_ids = set()
+    for book in all_books:
+        book_id = book.findtext("book_id")
+        if book_id and book_id not in seen_ids:
+            download_cover_if_missing(book)
+            seen_ids.add(book_id)
+
+    # Create a collage per month
+    for (year, month), books in sorted(books_by_month.items()):
+        print(f"Creating collage for {datetime(year, month, 1).strftime('%B %Y')} ({len(books)} books)")
+        create_collage(books, year, month)
+
+    # Start server
+    import subprocess
+    subprocess.run(["python", "server.py"])
