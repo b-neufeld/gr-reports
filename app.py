@@ -131,9 +131,6 @@ def create_collage(books, year, month):
     ratings = []
     titles = []
 
-    #debugging: 
-    print(f"Pillow version: {PIL.__version__}")
-
     # Load fonts with fallback
     try:
         title_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=title_font_size)
@@ -232,8 +229,9 @@ def create_collage(books, year, month):
         draw.text((title_x, title_y), title_text, font=title_font, fill="white")
 
     # Add header title
-    user_name = os.getenv("USER_NAME"+"'s ", "")
-    header_text = f"user_name{datetime(year, month, 1).strftime('%B')} Reads 📚"
+    user_name = os.getenv("USER_NAME", "")
+    title_prefix = f"{user_name}'s " if user_name else ""
+    header_text = +f"{title_prefix}{datetime(year, month, 1).strftime('%B')} Reads"
     header_font_size = 48
     try:
         header_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=header_font_size)
