@@ -8,7 +8,8 @@ import re
 from dateutil import parser as date_parser  # Add to requirements.txt
 from calendar import monthrange
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
-
+import PIL
+import subprocess
 
 # Configuration
 FEED_URL = os.getenv("GOODREADS_RSS_URL", "https://www.goodreads.com/review/list_rss/5672051?shelf=read")
@@ -109,19 +110,19 @@ def create_collage(books):
     padding = 30
     max_image_width = 300
     max_image_height = 450
-    title_font_size = 50
-    star_font_size = 100
+    title_font_size = 20
 
     images = []
     ratings = []
     titles = []
 
+    #debugging: 
+    print(f"Pillow version: {PIL.__version__}")
+
     # Load fonts with fallback
     try:
-        star_font = ImageFont.truetype("DejaVuSans-Bold.ttf", star_font_size)
-        title_font = ImageFont.truetype("DejaVuSans-Bold.ttf", title_font_size)
+        title_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=title_font_size)
     except Exception:
-        star_font = ImageFont.load_default()
         title_font = ImageFont.load_default()
 
     def resize_to_fit_box(img, max_w, max_h):
@@ -184,18 +185,27 @@ def create_collage(books):
 
         collage.paste(img, (img_x, img_y), img)
 
-        # Draw star rating (black star symbol ★)
-        stars = "★" * ratings[idx]
-        star_x = x + 10
-        star_y = img_y + 10
-        # Draw shadow for stars
-        draw.text((star_x + 1, star_y + 1), stars, font=star_font, fill="black")
-        # Draw foreground stars
-        draw.text((star_x, star_y), stars, font=star_font, fill="white")
-        print(f"Drawing stars '{stars}' at {(star_x, star_y)} for '{titles[idx]}'")
+        # Load star image once
+        STAR_PATH = Path("assets/star.png")
+        star_img = Image.open(STAR_PATH).convert("RGBA")
+
+        star_spacing = 10
+        star_scale = 0.1  # Scale relative to max image height
+        scaled_star_size = int(max_image_height * star_scale)
+        star_img = star_img.resize((scaled_star_size, scaled_star_size), Image.LANCZOS)
+
+        # Calculate starting X based on number of stars
+        stars_w = ratings[idx] * (scaled_star_size + star_spacing)
+        stars_x = x + (max_image_width - stars_w) // 2
+        stars_y = img_y + img_h - 60 # img_y + 10
+
+        for s in range(ratings[idx]):
+            sx = stars_x + s * (scaled_star_size + star_spacing)
+            collage.paste(star_img, (sx, stars_y), star_img)
 
         # Draw title centered below image with shadow for readability
-        title_text = titles[idx]
+        raw_title = titles[idx]
+        title_text = raw_title if len(raw_title) <= 30 else raw_title[:27] + "…"
         bbox = draw.textbbox((0, 0), title_text, font=title_font)
         title_w = bbox[2] - bbox[0]
         title_h = bbox[3] - bbox[1]

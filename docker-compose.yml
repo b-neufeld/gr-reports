@@ -10,3 +10,5 @@ services:
       - ./goodreads_cache:/app/rss_cache
       - ./covers:/app/covers
       - ./collages:/app/collages
+      # maybe not required
+      # - ./NotoColorEmoji.ttf:/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf
