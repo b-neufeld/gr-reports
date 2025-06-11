@@ -1,0 +1,11 @@
+services:
+  goodreads-collage:
+    build: .
+    image: goodreads-collage
+    ports:
+      - "8000:8000"
+    environment:
+      - GOODREADS_RSS_URL=https://www.goodreads.com/review/list_rss/5672051?shelf=read
+    volumes:
+      - ./goodreads_cache:/app/rss_cache
+      - ./covers:/app/covers

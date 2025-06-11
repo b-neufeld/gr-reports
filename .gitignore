@@ -1,2 +1,4 @@
 # Folder for files not to publish to github
 private/
+goodreads_cache/
+covers/
