@@ -231,7 +231,7 @@ def create_collage(books, year, month):
     # Add header title
     user_name = os.getenv("USER_NAME", "")
     title_prefix = f"{user_name}'s " if user_name else ""
-    header_text = +f"{title_prefix}{datetime(year, month, 1).strftime('%B')} Reads"
+    header_text = f"{title_prefix}{datetime(year, month, 1).strftime('%B')} Reads"
     header_font_size = 48
     try:
         header_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=header_font_size)
