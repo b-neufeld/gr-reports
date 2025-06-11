@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 import re
 from dateutil import parser as date_parser  # Add to requirements.txt
 from calendar import monthrange
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 
 # Configuration
@@ -106,24 +106,44 @@ def download_cover_if_missing(item):
 def create_collage(books):
     canvas_width, canvas_height = 1080, 1920
     margin = 20
-    padding = 10
+    padding = 30
     max_image_width = 300
     max_image_height = 450
+    title_font_size = 50
+    star_font_size = 100
 
     images = []
     ratings = []
+    titles = []
+
+    # Load fonts with fallback
+    try:
+        star_font = ImageFont.truetype("DejaVuSans-Bold.ttf", star_font_size)
+        title_font = ImageFont.truetype("DejaVuSans-Bold.ttf", title_font_size)
+    except Exception:
+        star_font = ImageFont.load_default()
+        title_font = ImageFont.load_default()
+
+    def resize_to_fit_box(img, max_w, max_h):
+        w, h = img.size
+        scale = min(max_w / w, max_h / h)
+        new_size = (int(w * scale), int(h * scale))
+        return img.resize(new_size, Image.LANCZOS)
 
     for book in books:
         book_id = book.findtext("book_id") or "unknown"
         user_rating = int(book.findtext("user_rating") or 0)
+        book_title = book.findtext("title") or "Unknown Title"
         image_path = COVER_DIR / f"{book_id}.jpg"
         if not image_path.exists():
+            print(f"Missing cover for '{book_title}' ({book_id}) - skipping")
             continue
         try:
-            img = Image.open(image_path).convert("RGB")
-            img.thumbnail((max_image_width, max_image_height))
+            img = Image.open(image_path).convert("RGBA")
+            img = resize_to_fit_box(img, max_image_width, max_image_height)
             images.append(img)
             ratings.append(user_rating)
+            titles.append(book_title)
         except Exception as e:
             print(f"Failed to load image {image_path}: {e}")
 
@@ -133,17 +153,15 @@ def create_collage(books):
 
     cols = min(3, len(images))
     rows = (len(images) + cols - 1) // cols
-    total_width = cols * max_image_width + (cols - 1) * padding + 2 * margin
-    total_height = rows * max_image_height + (rows - 1) * padding + 2 * margin
 
-    collage = Image.new("RGB", (canvas_width, canvas_height), (255, 255, 255))
+    # Calculate total collage size based on images and padding
+    total_width = cols * max_image_width + (cols - 1) * padding + 2 * margin
+    total_height = rows * (max_image_height + title_font_size + 10) + (rows - 1) * padding + 2 * margin
+
+    collage = Image.new("RGB", (canvas_width, canvas_height), (0, 0, 0))  # black background
     draw = ImageDraw.Draw(collage)
 
-    try:
-        font = ImageFont.truetype("DejaVuSans-Bold.ttf", 32)
-    except:
-        font = ImageFont.load_default()
-
+    # Center horizontally and vertically if fewer than max cols
     offset_x = (canvas_width - total_width) // 2
     offset_y = (canvas_height - total_height) // 2
 
@@ -151,13 +169,44 @@ def create_collage(books):
         row = idx // cols
         col = idx % cols
         x = offset_x + col * (max_image_width + padding)
-        y = offset_y + row * (max_image_height + padding)
-        collage.paste(img, (x, y))
+        y = offset_y + row * (max_image_height + title_font_size + 10 + padding)
 
-        stars = "⭐" * ratings[idx]
-        draw.text((x + 10, y + 10), stars, fill="black", font=font)
+        # Paste cover image over shadow
+        # Center the image in its allocated box
+        img_w, img_h = img.size
+        img_x = x + (max_image_width - img_w) // 2
+        img_y = y + (max_image_height - img_h) // 2
 
-    # Build output path
+        # Create visible drop shadow (dark gray semi-transparent) behind cover
+        shadow = Image.new("RGBA", img.size, (50, 50, 50, 180))  # dark gray shadow
+        shadow = shadow.filter(ImageFilter.GaussianBlur(radius=5))
+        collage.paste(shadow, (x + 10, img_y + 10), shadow)
+
+        collage.paste(img, (img_x, img_y), img)
+
+        # Draw star rating (black star symbol ★)
+        stars = "★" * ratings[idx]
+        star_x = x + 10
+        star_y = img_y + 10
+        # Draw shadow for stars
+        draw.text((star_x + 1, star_y + 1), stars, font=star_font, fill="black")
+        # Draw foreground stars
+        draw.text((star_x, star_y), stars, font=star_font, fill="white")
+        print(f"Drawing stars '{stars}' at {(star_x, star_y)} for '{titles[idx]}'")
+
+        # Draw title centered below image with shadow for readability
+        title_text = titles[idx]
+        bbox = draw.textbbox((0, 0), title_text, font=title_font)
+        title_w = bbox[2] - bbox[0]
+        title_h = bbox[3] - bbox[1]
+        title_x = x + (max_image_width - title_w) // 2
+        title_y = y + max_image_height + 5
+        # Shadow
+        draw.text((title_x + 1, title_y + 1), title_text, font=title_font, fill="black")
+        # Foreground
+        draw.text((title_x, title_y), title_text, font=title_font, fill="white")
+
+    # Save the collage with YYYY-MM.jpg format for last month
     now = datetime.utcnow()
     last_month = now.replace(day=1) - timedelta(days=1)
     collage_filename = f"{last_month.strftime('%Y-%m')}.jpg"
@@ -166,6 +215,7 @@ def create_collage(books):
 
     collage.save(output_path)
     print(f"Collage saved to {output_path}")
+
 
 
 # Run logic
