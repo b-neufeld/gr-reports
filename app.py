@@ -7,6 +7,8 @@ from urllib.parse import urlparse
 import re
 from dateutil import parser as date_parser  # Add to requirements.txt
 from calendar import monthrange
+from PIL import Image, ImageDraw, ImageFont
+
 
 # Configuration
 FEED_URL = os.getenv("GOODREADS_RSS_URL", "https://www.goodreads.com/review/list_rss/5672051?shelf=read")
@@ -101,6 +103,70 @@ def download_cover_if_missing(item):
     else:
         print(f"Cover for '{book_title}' (ID: {book_id}) already exists.")
 
+def create_collage(books):
+    canvas_width, canvas_height = 1080, 1920
+    margin = 20
+    padding = 10
+    max_image_width = 300
+    max_image_height = 450
+
+    images = []
+    ratings = []
+
+    for book in books:
+        book_id = book.findtext("book_id") or "unknown"
+        user_rating = int(book.findtext("user_rating") or 0)
+        image_path = COVER_DIR / f"{book_id}.jpg"
+        if not image_path.exists():
+            continue
+        try:
+            img = Image.open(image_path).convert("RGB")
+            img.thumbnail((max_image_width, max_image_height))
+            images.append(img)
+            ratings.append(user_rating)
+        except Exception as e:
+            print(f"Failed to load image {image_path}: {e}")
+
+    if not images:
+        print("No images found to include in collage.")
+        return
+
+    cols = min(3, len(images))
+    rows = (len(images) + cols - 1) // cols
+    total_width = cols * max_image_width + (cols - 1) * padding + 2 * margin
+    total_height = rows * max_image_height + (rows - 1) * padding + 2 * margin
+
+    collage = Image.new("RGB", (canvas_width, canvas_height), (255, 255, 255))
+    draw = ImageDraw.Draw(collage)
+
+    try:
+        font = ImageFont.truetype("DejaVuSans-Bold.ttf", 32)
+    except:
+        font = ImageFont.load_default()
+
+    offset_x = (canvas_width - total_width) // 2
+    offset_y = (canvas_height - total_height) // 2
+
+    for idx, img in enumerate(images):
+        row = idx // cols
+        col = idx % cols
+        x = offset_x + col * (max_image_width + padding)
+        y = offset_y + row * (max_image_height + padding)
+        collage.paste(img, (x, y))
+
+        stars = "⭐" * ratings[idx]
+        draw.text((x + 10, y + 10), stars, fill="black", font=font)
+
+    # Build output path
+    now = datetime.utcnow()
+    last_month = now.replace(day=1) - timedelta(days=1)
+    collage_filename = f"{last_month.strftime('%Y-%m')}.jpg"
+    output_path = Path("collages") / collage_filename
+    output_path.parent.mkdir(exist_ok=True)
+
+    collage.save(output_path)
+    print(f"Collage saved to {output_path}")
+
 
 # Run logic
 if __name__ == "__main__":
@@ -114,3 +180,5 @@ if __name__ == "__main__":
     print(f"Found {len(books_last_month)} books read last month.")
     for book in books_last_month:
         download_cover_if_missing(book)
+
+    create_collage(books_last_month)

@@ -9,3 +9,4 @@ services:
     volumes:
       - ./goodreads_cache:/app/rss_cache
       - ./covers:/app/covers
+      - ./collages:/app/collages
