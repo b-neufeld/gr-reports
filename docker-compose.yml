@@ -3,10 +3,13 @@ services:
     build: .
     image: goodreads-collage
     ports:
-      - "8000:5000"
+      - "8000:5000" #outside port:inside port
     environment:
+      # Example URL: https://www.goodreads.com/review/list_rss/5672051?shelf=read (see bottom of "Read" shelf page)
       - GOODREADS_RSS_URL=https://www.goodreads.com/review/list_rss/5672051?shelf=read
+      - USER_NAME=Brahm
     volumes:
-      - ./goodreads_cache:/app/rss_cache
+      # create and map three local volumes. outside:inside
+      - ./rss_cache:/app/rss_cache
       - ./covers:/app/covers
       - ./collages:/app/collages

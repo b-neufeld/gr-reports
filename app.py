@@ -232,7 +232,8 @@ def create_collage(books, year, month):
         draw.text((title_x, title_y), title_text, font=title_font, fill="white")
 
     # Add header title
-    header_text = f"{datetime(year, month, 1).strftime('%B')} Reads"
+    user_name = os.getenv("USER_NAME"+"'s ", "")
+    header_text = f"user_name{datetime(year, month, 1).strftime('%B')} Reads 📚"
     header_font_size = 48
     try:
         header_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=header_font_size)
@@ -278,7 +279,3 @@ if __name__ == "__main__":
     for (year, month), books in sorted(books_by_month.items()):
         print(f"Creating collage for {datetime(year, month, 1).strftime('%B %Y')} ({len(books)} books)")
         create_collage(books, year, month)
-
-    # Start server
-    import subprocess
-    subprocess.run(["python", "server.py"])
