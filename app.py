@@ -201,9 +201,11 @@ def create_collage(books, year, month):
     # Load star image once
     STAR_PATH = Path("assets/star.png")
     star_img = Image.open(STAR_PATH).convert("RGBA")
-    star_scale = 0.1
-    scaled_star_size = int(max_image_height * star_scale)
-    star_img = star_img.resize((scaled_star_size, scaled_star_size), Image.LANCZOS)
+    # Dynamically scale stars based on image height, with sensible bounds
+    def get_scaled_star(img_h):
+        return max(20, min(48, int(img_h * 0.1)))  # clamp between 20px and 48px
+    scaled_star_size = get_scaled_star(img_h)
+    star_resized = star_img.resize((scaled_star_size, scaled_star_size), Image.LANCZOS)
     star_spacing = 10
 
     total_grid_width = cols * max_image_width + (cols - 1) * padding
@@ -237,7 +239,7 @@ def create_collage(books, year, month):
 
         for s in range(ratings[idx]):
             sx = stars_x + s * (scaled_star_size + star_spacing)
-            collage.paste(star_img, (sx, stars_y), star_img)
+            collage.paste(star_resized, (sx, stars_y), star_resized)
 
         # Review text truncation logic
         raw_review = user_reviews[idx]
