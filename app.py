@@ -122,8 +122,8 @@ def create_collage(books, year, month):
     canvas_width, canvas_height = 1080, 1920
     margin = 20
     padding = 30
-    max_image_width = 300
-    max_image_height = 450
+    max_image_width = 600 #300
+    max_image_height = 900 #450
     title_font_size = 20
 
     images = []
@@ -167,7 +167,7 @@ def create_collage(books, year, month):
         return
 
     # Trying minimum 1 columns, change back to 3 if this doesn't work. 
-    cols = min(1, len(images))
+    cols = min(3, len(images))
     rows = (len(images) + cols - 1) // cols
 
     # Calculate total collage size based on images and padding
