@@ -47,8 +47,8 @@ def run_daily_task():
     while True:
         print("Running app.py task...")
         subprocess.run(["python", "app.py"]) # run Goodreads collection & image gen script
-        # time.sleep(24 * 60 * 60)  # sleep 24 hours # use this after debugging. 
-        time.sleep(60) # sleep 60 seconds during debugging. 
+        time.sleep(24 * 60 )  # sleep 1 hour before refreshing collages
+        # time.sleep(60) # sleep 60 seconds during debugging. 
 
 @app.route("/")
 def index():

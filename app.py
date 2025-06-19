@@ -8,7 +8,6 @@ import re
 from dateutil import parser as date_parser  
 from calendar import monthrange
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
-# import PIL # commenting this out as I don't think it's required. Delete later. 
 from collections import defaultdict
 
 
