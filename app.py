@@ -253,7 +253,15 @@ def create_collage(books, year, month):
             bbox = draw.textbbox((0, 0), review_text, font=title_font)
             title_w = bbox[2] - bbox[0]
             title_x = x + (max_image_width - title_w) // 2
-            title_y = y + max_image_height + 5
+
+            # Dynamically position review text
+            box_bottom = y + max_image_height
+            img_bottom = img_y + img_h
+            text_space = box_bottom - img_bottom
+            buffer_above = max(5, text_space // 2)
+            title_y = img_bottom + buffer_above
+            title_y = min(title_y, canvas_height - margin - title_font_size)
+
             draw.text((title_x + 1, title_y + 1), review_text, font=title_font, fill="black")
             draw.text((title_x, title_y), review_text, font=title_font, fill="white")
 
