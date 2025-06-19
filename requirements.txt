@@ -1,6 +1,3 @@
-# commenting out stuff I don't think I need any more. 
-# fastapi
-# uvicorn[standard]
 requests
 python-dateutil
 Pillow
