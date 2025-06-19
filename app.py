@@ -1,5 +1,6 @@
 import os
 import requests
+import math
 from datetime import datetime, timedelta
 from pathlib import Path
 import xml.etree.ElementTree as ET
@@ -122,26 +123,58 @@ def create_collage(books, year, month):
     canvas_width, canvas_height = 1080, 1920
     margin = 20
     padding = 30
-    max_image_width = 600 #300
-    max_image_height = 900 #450
     title_font_size = 20
+    header_font_size = 48
+    header_reserved_space = 150  # Space reserved for header
 
     images = []
     ratings = []
     titles = []
     user_reviews = []
 
-    # Load fonts with fallback
+    # Load fonts
     try:
         title_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=title_font_size)
     except Exception:
         title_font = ImageFont.load_default()
+    try:
+        header_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=header_font_size)
+    except Exception:
+        header_font = ImageFont.load_default()
 
     def resize_to_fit_box(img, max_w, max_h):
         w, h = img.size
         scale = min(max_w / w, max_h / h)
         new_size = (int(w * scale), int(h * scale))
         return img.resize(new_size, Image.LANCZOS)
+
+    def calculate_optimal_grid(n_images, canvas_width, canvas_height, margin, padding, aspect_ratio=2/3):
+        best_cols = 1
+        best_rows = n_images
+        best_img_w = 0
+        best_img_h = 0
+
+        for cols in range(1, n_images + 1):
+            rows = math.ceil(n_images / cols)
+            available_width = canvas_width - 2 * margin - (cols - 1) * padding
+            available_height = canvas_height - 2 * margin - (rows - 1) * padding - header_reserved_space
+            max_img_w = available_width // cols
+            max_img_h = available_height // rows
+
+            if max_img_w / max_img_h > aspect_ratio:
+                img_h = max_img_h
+                img_w = int(img_h * aspect_ratio)
+            else:
+                img_w = max_img_w
+                img_h = int(img_w / aspect_ratio)
+
+            if img_w * img_h > best_img_w * best_img_h:
+                best_cols = cols
+                best_rows = rows
+                best_img_w = img_w
+                best_img_h = img_h
+
+        return best_cols, best_rows, best_img_w, best_img_h
 
     for book in books:
         book_id = book.findtext("book_id") or "unknown"
@@ -154,7 +187,6 @@ def create_collage(books, year, month):
             continue
         try:
             img = Image.open(image_path).convert("RGBA")
-            img = resize_to_fit_box(img, max_image_width, max_image_height)
             images.append(img)
             ratings.append(user_rating)
             titles.append(book_title)
@@ -166,93 +198,77 @@ def create_collage(books, year, month):
         print("No images found to include in collage.")
         return
 
-    # Trying minimum 1 columns, change back to 3 if this doesn't work. 
-    cols = min(3, len(images))
-    rows = (len(images) + cols - 1) // cols
+    cols, rows, max_image_width, max_image_height = calculate_optimal_grid(
+        len(images), canvas_width, canvas_height, margin, padding
+    )
 
-    # Calculate total collage size based on images and padding
     total_width = cols * max_image_width + (cols - 1) * padding + 2 * margin
-    total_height = rows * (max_image_height + title_font_size + 10) + (rows - 1) * padding + 2 * margin
+    total_height = rows * (max_image_height + title_font_size + 10) + (rows - 1) * padding + 2 * margin + header_reserved_space
 
-    collage = Image.new("RGB", (canvas_width, canvas_height), (0, 0, 0))  # black background
+    collage = Image.new("RGB", (canvas_width, canvas_height), (0, 0, 0))
     draw = ImageDraw.Draw(collage)
 
-    # Center horizontally and vertically if fewer than max cols
     offset_x = (canvas_width - total_width) // 2
-    offset_y = (canvas_height - total_height) // 2
+    offset_y = (canvas_height - total_height) // 2 + header_reserved_space
 
     for idx, img in enumerate(images):
+        img = resize_to_fit_box(img, max_image_width, max_image_height)
         row = idx // cols
         col = idx % cols
         x = offset_x + col * (max_image_width + padding)
         y = offset_y + row * (max_image_height + title_font_size + 10 + padding)
 
-        # Paste cover image over shadow
-        # Center the image in its allocated box
         img_w, img_h = img.size
         img_x = x + (max_image_width - img_w) // 2
         img_y = y + (max_image_height - img_h) // 2
 
-        # Create visible drop shadow (dark gray semi-transparent) behind cover
-        shadow = Image.new("RGBA", img.size, (50, 50, 50, 180))  # dark gray shadow
+        # Drop shadow
+        shadow = Image.new("RGBA", img.size, (50, 50, 50, 180))
         shadow = shadow.filter(ImageFilter.GaussianBlur(radius=5))
-        collage.paste(shadow, (x + 10, img_y + 10), shadow)
+        collage.paste(shadow, (img_x + 10, img_y + 10), shadow)
 
         collage.paste(img, (img_x, img_y), img)
 
-        # Load star image once
+        # Draw star images
         STAR_PATH = Path("assets/star.png")
         star_img = Image.open(STAR_PATH).convert("RGBA")
-
         star_spacing = 10
-        star_scale = 0.1  # Scale relative to max image height
+        star_scale = 0.1
         scaled_star_size = int(max_image_height * star_scale)
         star_img = star_img.resize((scaled_star_size, scaled_star_size), Image.LANCZOS)
 
-        # Calculate starting X based on number of stars
         stars_w = ratings[idx] * (scaled_star_size + star_spacing)
         stars_x = x + (max_image_width - stars_w) // 2
-        stars_y = img_y + img_h - 60 # img_y + 10
+        stars_y = img_y + img_h - scaled_star_size - 10
 
         for s in range(ratings[idx]):
             sx = stars_x + s * (scaled_star_size + star_spacing)
             collage.paste(star_img, (sx, stars_y), star_img)
 
-        # Draw title centered below image with shadow for readability
-        # changed this to grab user_review instead of title - update variable names later. 
+        # Draw title (review text for now)
         raw_title = user_reviews[idx]
         title_text = raw_title if len(raw_title) <= 30 else raw_title[:27] + "…"
         bbox = draw.textbbox((0, 0), title_text, font=title_font)
         title_w = bbox[2] - bbox[0]
-        title_h = bbox[3] - bbox[1]
         title_x = x + (max_image_width - title_w) // 2
         title_y = y + max_image_height + 5
-        # Shadow
         draw.text((title_x + 1, title_y + 1), title_text, font=title_font, fill="black")
-        # Foreground
         draw.text((title_x, title_y), title_text, font=title_font, fill="white")
 
-    # Add header title
+    # Header
     user_name = os.getenv("USER_NAME", "")
     title_prefix = f"{user_name}'s " if user_name else ""
     header_text = f"{title_prefix}{datetime(year, month, 1).strftime('%B')} Reads"
-    header_font_size = 48
-    try:
-        header_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=header_font_size)
-    except Exception:
-        header_font = ImageFont.load_default()
-
     header_bbox = draw.textbbox((0, 0), header_text, font=header_font)
     header_w = header_bbox[2] - header_bbox[0]
     header_x = (canvas_width - header_w) // 2
     draw.text((header_x + 1, margin + 1), header_text, font=header_font, fill="black")
     draw.text((header_x, margin), header_text, font=header_font, fill="white")
 
-    # Save the collage with YYYY-MM.jpg format for last month
+    # Save
     collage_filename = f"{year:04d}-{month:02d}.jpg"
     output_path = Path("collages") / collage_filename
     output_path.parent.mkdir(exist_ok=True)
-
     collage.save(output_path)
     print(f"Collage saved to {output_path}")
 
