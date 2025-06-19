@@ -244,7 +244,7 @@ def create_collage(books, year, month):
         if cols >= 4:
             title_text = ""
         else:
-            char_limit = {1: 65, 2: 40, 3: 27}.get(cols, 0)
+            char_limit = {1: 80, 2: 45, 3: 27}.get(cols, 0)
             title_text = raw_review if len(raw_review) <= char_limit else raw_review[:char_limit - 1] + "…"
 
         if title_text:
