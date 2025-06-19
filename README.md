@@ -1,9 +1,11 @@
 # gr-reports
-My sister had a cool idea to post her monthly reads to Instagram Stories. She built Stories by saving book covers to a folder on her phone, then taking a screenshot of that folder. I loved the idea and her monthly posts but I wanted to do something more automatic for myself. 
+My sister had a cool idea to post her monthly book reads to Instagram Stories. She built Stories by saving book covers to a folder on her phone, then taking a screenshot of that folder. I loved the idea and her monthly posts but I wanted to do something more automatic for myself. As a Goodreads user I realized a rich trove of data was available in the Goodreads RSS feed, so I leveraged that. 
 
 This is a fairly-simple Python script and flask application that grabs a user's Goodreads RSS feed (at most once per 24 hours to avoid hammering Goodreads), downloads book cover images (once, to avoid repeated downloads), and generates fairly simple images sized to be posted to Instagram Stories. Currently, the user's star rating and a snippet of text from the review are included with the image as well. 
 
 The application runs in a Docker container so the web page is available wherever a user sets up that container. 
+
+A bunch of ChatGPT was used in building this little app. I am sharing it completely without warranty or support, but improvement suggestions are welcome! 
 
 Docker Compose: 
 ```yaml
