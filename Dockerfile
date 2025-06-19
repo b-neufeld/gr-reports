@@ -32,7 +32,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Set up cron job
 # RUN echo "0 6 * * * root /usr/local/bin/python /app/app.py >> /var/log/cron.log 2>&1" > /etc/cron.d/daily-collage
 # RUN chmod 0644 /etc/cron.d/daily-collage && crontab /etc/cron.d/daily-collage
-3333333333# Set up log file
+# Set up log file
 # RUN touch /var/log/cron.log
 
 # Expose port
