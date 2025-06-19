@@ -5,19 +5,19 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 from urllib.parse import urlparse
 import re
-from dateutil import parser as date_parser  # Add to requirements.txt
+from dateutil import parser as date_parser  
 from calendar import monthrange
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
-import PIL
+# import PIL # commenting this out as I don't think it's required. Delete later. 
 from collections import defaultdict
 
 
 # Configuration
 FEED_URL = os.getenv("GOODREADS_RSS_URL", "https://www.goodreads.com/review/list_rss/5672051?shelf=read")
-
+# XML files, limited to one per 24 hours. 
 CACHE_DIR = Path("rss_cache")
 CACHE_DIR.mkdir(exist_ok=True)
-
+# Cover directory. 
 COVER_DIR = Path("covers")
 COVER_DIR.mkdir(exist_ok=True)
 
@@ -31,7 +31,7 @@ def is_file_older_than_24_hours(file_path):
 
 def fetch_and_cache_feed():
     headers = {
-        "User-Agent": "Mozilla/5.0 (compatible; RSSFetcher/1.0; +https://brahm.ca)"
+        "User-Agent": "Mozilla/5.0 (compatible; RSSFetcher/1.0; +https://github.com/b-neufeld/gr-reports)"
     }
 
     print(f"Fetching RSS feed from {FEED_URL}")
@@ -164,7 +164,8 @@ def create_collage(books, year, month):
         print("No images found to include in collage.")
         return
 
-    cols = min(3, len(images))
+    # Trying minimum 1 columns, change back to 3 if this doesn't work. 
+    cols = min(1, len(images))
     rows = (len(images) + cols - 1) // cols
 
     # Calculate total collage size based on images and padding
