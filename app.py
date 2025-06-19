@@ -242,18 +242,18 @@ def create_collage(books, year, month):
         # Review text truncation logic
         raw_review = user_reviews[idx]
         if cols >= 4:
-            title_text = ""
+            review_text = ""
         else:
             char_limit = {1: 80, 2: 45, 3: 27}.get(cols, 0)
-            title_text = raw_review if len(raw_review) <= char_limit else raw_review[:char_limit - 1] + "…"
+            review_text = raw_review if len(raw_review) <= char_limit else raw_review[:char_limit - 1] + "…"
 
-        if title_text:
-            bbox = draw.textbbox((0, 0), title_text, font=title_font)
+        if review_text:
+            bbox = draw.textbbox((0, 0), review_text, font=title_font)
             title_w = bbox[2] - bbox[0]
             title_x = x + (max_image_width - title_w) // 2
             title_y = y + max_image_height + 5
-            draw.text((title_x + 1, title_y + 1), title_text, font=title_font, fill="black")
-            draw.text((title_x, title_y), title_text, font=title_font, fill="white")
+            draw.text((title_x + 1, title_y + 1), review_text, font=title_font, fill="black")
+            draw.text((title_x, title_y), review_text, font=title_font, fill="white")
 
     # Header
     user_name = os.getenv("USER_NAME", "")
