@@ -130,6 +130,7 @@ def create_collage(books, year, month):
     images = []
     ratings = []
     titles = []
+    user_reviews = []
 
     # Load fonts with fallback
     try:
@@ -147,6 +148,7 @@ def create_collage(books, year, month):
         book_id = book.findtext("book_id") or "unknown"
         user_rating = int(book.findtext("user_rating") or 0)
         book_title = book.findtext("title") or "Unknown Title"
+        user_review = book.findtext("user_review") or "No Review"
         image_path = COVER_DIR / f"{book_id}.jpg"
         if not image_path.exists():
             print(f"Missing cover for '{book_title}' ({book_id}) - skipping")
@@ -157,6 +159,7 @@ def create_collage(books, year, month):
             images.append(img)
             ratings.append(user_rating)
             titles.append(book_title)
+            user_reviews.append(user_review)
         except Exception as e:
             print(f"Failed to load image {image_path}: {e}")
 
@@ -217,7 +220,8 @@ def create_collage(books, year, month):
             collage.paste(star_img, (sx, stars_y), star_img)
 
         # Draw title centered below image with shadow for readability
-        raw_title = titles[idx]
+        # changed this to grab user_review instead of title - update variable names later. 
+        raw_title = user_reviews[idx]
         title_text = raw_title if len(raw_title) <= 30 else raw_title[:27] + "…"
         bbox = draw.textbbox((0, 0), title_text, font=title_font)
         title_w = bbox[2] - bbox[0]
