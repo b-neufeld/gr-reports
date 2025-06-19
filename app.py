@@ -204,8 +204,6 @@ def create_collage(books, year, month):
     # Dynamically scale stars based on image height, with sensible bounds
     def get_scaled_star(img_h):
         return max(20, min(48, int(img_h * 0.1)))  # clamp between 20px and 48px
-    scaled_star_size = get_scaled_star(img_h)
-    star_resized = star_img.resize((scaled_star_size, scaled_star_size), Image.LANCZOS)
     star_spacing = 10
 
     total_grid_width = cols * max_image_width + (cols - 1) * padding
@@ -233,6 +231,8 @@ def create_collage(books, year, month):
         collage.paste(img, (img_x, img_y), img)
 
         # Draw stars
+        scaled_star_size = get_scaled_star(img_h)
+        star_resized = star_img.resize((scaled_star_size, scaled_star_size), Image.LANCZOS)
         stars_w = ratings[idx] * (scaled_star_size + star_spacing)
         stars_x = x + (max_image_width - stars_w) // 2
         stars_y = img_y + img_h - 60
