@@ -7,6 +7,7 @@ services:
     environment:
       # Example URL: https://www.goodreads.com/review/list_rss/5672051?shelf=read (see bottom of "Read" shelf page)
       - GOODREADS_RSS_URL=https://www.goodreads.com/review/list_rss/5672051?shelf=read
+      # This name appears at the top of generated images. 
       - USER_NAME=Brahm
     volumes:
       # create and map three local volumes. outside:inside
