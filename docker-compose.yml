@@ -1,16 +1,19 @@
+# Example Docker-Compose
 services:
   goodreads-collage:
-    build: .
-    image: goodreads-collage
+    container_name: goodreads-collage
+    image: ghcr.io/b-neufeld/gr-reports:latest
     ports:
-      - "8000:5000" #outside port:inside port
+      # Port outside container : port inside container 
+      - 8010:5000 
     environment:
       # Example URL: https://www.goodreads.com/review/list_rss/5672051?shelf=read (see bottom of "Read" shelf page)
       - GOODREADS_RSS_URL=https://www.goodreads.com/review/list_rss/5672051?shelf=read
-      # This name appears at the top of generated images. 
+      # For header of image
       - USER_NAME=Brahm
     volumes:
-      # create and map three local volumes. outside:inside
-      - ./rss_cache:/app/rss_cache
-      - ./covers:/app/covers
-      - ./collages:/app/collages
+      # create and map three volumes for caching RSS feeds, book covers, and collages. 
+      - /path/to/local/storage/rss_cache:/app/rss_cache
+      - /path/to/local/storage/covers:/app/covers
+      - /path/to/local/storage/collages:/app/collages
+    restart: unless-stopped
