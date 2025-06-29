@@ -47,6 +47,16 @@ def fetch_and_cache_feed():
     print(f"Saved new RSS feed to {filepath}")
     return filepath
 
+def limit_cache_files(max_files=20):
+    """Keep only the newest max_files XML files in CACHE_DIR."""
+    xml_files = sorted(CACHE_DIR.glob("rss_*.xml"), key=lambda f: f.stat().st_mtime, reverse=True)
+    for old_file in xml_files[max_files:]:
+        try:
+            print(f"🗑 Removing old cache file: {old_file}")
+            old_file.unlink()
+        except Exception as e:
+            print(f"❌ Failed to remove {old_file}: {e}")
+
 def get_feed():
     latest_file = get_latest_feed_file()
     if latest_file and not is_file_older_than_24_hours(latest_file):
@@ -292,6 +302,9 @@ def create_collage(books, year, month):
 # Run logic
 if __name__ == "__main__":
     feed_file = get_feed()
+
+    limit_cache_files(max_files=20)
+
     items = parse_feed(feed_file)
     print(f"Feed file: {feed_file}")
 
