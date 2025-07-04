@@ -36,3 +36,6 @@ Web app:
 Example image:
 ![image](https://github.com/user-attachments/assets/1ce4220a-0847-4ed4-977a-5e1cc9e625b9)
 
+# How to set this up if you've never heard of Docker before
+1. Download and install Docker Desktop: https://www.docker.com/products/docker-desktop/
+2. 
