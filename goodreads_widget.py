@@ -96,6 +96,10 @@ def extract_widget_html(widget_javascript: str) -> str:
 
     quoted_value = widget_javascript[start:end]
 
+    # JavaScript may escape forward slashes as \/.
+    # Python does not need forward slashes escaped.
+    quoted_value = quoted_value.replace(r"\/", "/")
+
     try:
         widget_html = ast.literal_eval(quoted_value)
     except (SyntaxError, ValueError) as error:
