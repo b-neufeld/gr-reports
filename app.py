@@ -116,201 +116,471 @@ def get_books_read_last_month(items):
     return recent_books
 
 def sanitize_filename(name):
-    return re.sub(r'[^\w\-_.]', '_', name)
+    return re.sub(r"[^\w\-_.]", "_", str(name))
 
-def download_cover_if_missing(item):
-    image_url = item.findtext("book_large_image_url")
-    book_title = item.findtext("title") or "unknown"
-    book_id = item.findtext("book_id") or "unknown_id"
-    sanitized_id = re.sub(r'[^\w\-_.]', '_', book_id)
-    cover_path = COVER_DIR / f"{sanitized_id}.jpg"
+def get_cover_path(book):
+    """Return the local cover path for a Book object."""
 
-    if not cover_path.exists():
-        try:
-            response = requests.get(image_url, stream=True, timeout=10)
-            response.raise_for_status()
-            with open(cover_path, "wb") as f:
-                for chunk in response.iter_content(1024):
-                    f.write(chunk)
-            print(f"Downloaded cover for '{book_title}' (ID: {book_id})")
-        except Exception as e:
-            print(f"Failed to download cover for '{book_title}' (ID: {book_id}): {e}")
-    else:
-        print(f"Cover for '{book_title}' (ID: {book_id}) already exists.")
+    safe_book_id = sanitize_filename(book.book_id or book.review_id)
+    return COVER_DIR / f"{safe_book_id}.jpg"
 
-def create_collage(books, year, month):
-    canvas_width, canvas_height = 1080, 1920
+
+def download_cover_if_missing(book):
+    """Download and cache a book cover."""
+
+    cover_path = get_cover_path(book)
+
+    if cover_path.exists():
+        print(
+            f"Cover for '{book.title}' "
+            f"(ID: {book.book_id}) already exists."
+        )
+        return cover_path
+
+    if not book.cover_url:
+        print(f"No cover URL available for '{book.title}'")
+        return None
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 "
+            "(compatible; gr-reports/2.0; "
+            "+https://github.com/b-neufeld/gr-reports)"
+        )
+    }
+
+    try:
+        response = requests.get(
+            book.cover_url,
+            headers=headers,
+            stream=True,
+            timeout=30,
+        )
+        response.raise_for_status()
+
+        content_type = response.headers.get("Content-Type", "")
+
+        if not content_type.startswith("image/"):
+            raise ValueError(
+                f"Expected an image but received {content_type or 'unknown content'}"
+            )
+
+        with cover_path.open("wb") as file:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    file.write(chunk)
+
+        # Verify that Pillow can open the downloaded file.
+        with Image.open(cover_path) as image:
+            image.verify()
+
+        print(
+            f"Downloaded cover for '{book.title}' "
+            f"(ID: {book.book_id})"
+        )
+
+        return cover_path
+
+    except Exception as error:
+        print(f"Failed to download cover for '{book.title}': {error}")
+
+        # Remove a partial or invalid download.
+        if cover_path.exists():
+            cover_path.unlink()
+
+        return None
+
+def create_collage(
+    books,
+    output_filename,
+    header_text,
+):
+    """Create an Instagram Story collage from Book objects."""
+
+    canvas_width = 1080
+    canvas_height = 1920
     margin = 20
     padding = 30
-    title_font_size = 20
+    review_font_size = 20
 
-    images, ratings, titles, user_reviews = [], [], [], []
+    images = []
+    ratings = []
+    reviews = []
+    included_books = []
 
-    # Load fonts with fallback
     try:
-        title_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=title_font_size)
+        review_font = ImageFont.truetype(
+            "DejaVuSans-Bold.ttf",
+            size=review_font_size,
+        )
     except Exception:
-        title_font = ImageFont.load_default()
+        review_font = ImageFont.load_default()
 
-    def resize_to_fit_box(img, max_w, max_h):
-        w, h = img.size
-        scale = min(max_w / w, max_h / h)
-        new_size = (int(w * scale), int(h * scale))
-        return img.resize(new_size, Image.LANCZOS)
+    def resize_to_fit_box(image, max_width, max_height):
+        width, height = image.size
+
+        scale = min(
+            max_width / width,
+            max_height / height,
+        )
+
+        new_size = (
+            max(1, int(width * scale)),
+            max(1, int(height * scale)),
+        )
+
+        return image.resize(new_size, Image.Resampling.LANCZOS)
 
     for book in books:
-        book_id = book.findtext("book_id") or "unknown"
-        user_rating = int(book.findtext("user_rating") or 0)
-        book_title = book.findtext("title") or "Unknown Title"
-        user_review = book.findtext("user_review") or "No Review"
-        image_path = COVER_DIR / f"{book_id}.jpg"
+        image_path = get_cover_path(book)
+
         if not image_path.exists():
-            print(f"Missing cover for '{book_title}' ({book_id}) - skipping")
+            print(
+                f"Missing cover for '{book.title}' "
+                f"({book.book_id}) - skipping"
+            )
             continue
+
         try:
-            img = Image.open(image_path).convert("RGBA")
-            images.append(img)
-            ratings.append(user_rating)
-            titles.append(book_title)
-            user_reviews.append(user_review)
-        except Exception as e:
-            print(f"Failed to load image {image_path}: {e}")
+            with Image.open(image_path) as source_image:
+                image = source_image.convert("RGBA")
+
+            images.append(image)
+            ratings.append(float(book.rating or 0))
+            reviews.append(book.review or "")
+            included_books.append(book)
+
+        except Exception as error:
+            print(
+                f"Failed to load cover for "
+                f"'{book.title}' from {image_path}: {error}"
+            )
 
     if not images:
-        print("No images found to include in collage.")
-        return
+        print("No valid cover images found for the collage.")
+        return None
 
-    num_images = len(images)
+    number_of_images = len(images)
 
-    # Dynamic grid layout
-    def determine_grid(n):
-        if n == 1:
+    def determine_grid(number):
+        if number == 1:
             return 1, 1
-        elif n == 2:
+        if number == 2:
             return 2, 1
-        elif n <= 4:
+        if number <= 4:
             return 2, 2
-        elif n <= 6:
+        if number <= 6:
             return 3, 2
-        elif n <= 9:
+        if number <= 9:
             return 3, 3
-        elif n <= 12:
+        if number <= 12:
             return 4, 3
-        else:
-            cols = min(4, int(n ** 0.5) + 1)
-            rows = (n + cols - 1) // cols
-            return cols, rows
 
-    cols, rows = determine_grid(num_images)
+        columns = min(4, int(number ** 0.5) + 1)
+        rows = math.ceil(number / columns)
+        return columns, rows
 
-    # Available area for grid
-    available_width = canvas_width - 2 * margin - (cols - 1) * padding
-    available_height = canvas_height - 2 * margin - (rows - 1) * padding - 150  # leave room for header
+    columns, rows = determine_grid(number_of_images)
 
-    max_image_width = available_width // cols
-    max_image_height = available_height // rows
+    available_width = (
+        canvas_width
+        - (2 * margin)
+        - ((columns - 1) * padding)
+    )
 
-    # Resize images now that max size is known
-    resized_images = [resize_to_fit_box(img, max_image_width, max_image_height) for img in images]
+    available_height = (
+        canvas_height
+        - (2 * margin)
+        - ((rows - 1) * padding)
+        - 150
+    )
 
-    # Create canvas
-    collage = Image.new("RGB", (canvas_width, canvas_height), (0, 0, 0))
+    cell_width = available_width // columns
+
+    # Reserve room inside each row for review text.
+    review_area_height = 55 if columns < 4 else 0
+    cell_height = available_height // rows
+    max_image_height = max(1, cell_height - review_area_height)
+
+    resized_images = [
+        resize_to_fit_box(
+            image,
+            cell_width,
+            max_image_height,
+        )
+        for image in images
+    ]
+
+    collage = Image.new(
+        "RGB",
+        (canvas_width, canvas_height),
+        (0, 0, 0),
+    )
+
     draw = ImageDraw.Draw(collage)
 
-    # Load star image once
-    STAR_PATH = Path("assets/star.png")
-    star_img = Image.open(STAR_PATH).convert("RGBA")
-    # Dynamically scale stars based on image height, with sensible bounds
-    def get_scaled_star(img_h):
-        return max(20, min(48, int(img_h * 0.1)))  # clamp between 20px and 48px
-    star_spacing = 10
+    star_path = Path("assets/star.png")
 
-    total_grid_width = cols * max_image_width + (cols - 1) * padding
-    total_grid_height = rows * (max_image_height + title_font_size + 10) + (rows - 1) * padding
+    if not star_path.exists():
+        raise FileNotFoundError(
+            f"Star image was not found at {star_path}"
+        )
 
-    offset_x = (canvas_width - total_grid_width) // 2
-    offset_y = (canvas_height - total_grid_height) // 2 + 80  # shift down to leave space for header
+    star_image = Image.open(star_path).convert("RGBA")
 
-    for idx, img in enumerate(resized_images):
-        row = idx // cols
-        col = idx % cols
-        x = offset_x + col * (max_image_width + padding)
-        y = offset_y + row * (max_image_height + title_font_size + 10 + padding)
+    def get_scaled_star_size(image_height):
+        return max(
+            20,
+            min(48, int(image_height * 0.1)),
+        )
 
-        img_w, img_h = img.size
-        img_x = x + (max_image_width - img_w) // 2
-        img_y = y + (max_image_height - img_h) // 2
+    star_spacing = 8
 
-        # Drop shadow
-        shadow = Image.new("RGBA", img.size, (50, 50, 50, 180))
-        shadow = shadow.filter(ImageFilter.GaussianBlur(radius=5))
-        collage.paste(shadow, (img_x + 10, img_y + 10), shadow)
+    grid_width = (
+        columns * cell_width
+        + (columns - 1) * padding
+    )
 
-        # Paste image
-        collage.paste(img, (img_x, img_y), img)
+    grid_height = (
+        rows * cell_height
+        + (rows - 1) * padding
+    )
 
-        # Draw stars
-        scaled_star_size = get_scaled_star(img_h)
-        star_resized = star_img.resize((scaled_star_size, scaled_star_size), Image.LANCZOS)
-        stars_w = ratings[idx] * (scaled_star_size + star_spacing)
-        stars_x = x + (max_image_width - stars_w) // 2
-        stars_y = img_y + img_h - 60
+    offset_x = (canvas_width - grid_width) // 2
+    offset_y = (
+        (canvas_height - grid_height) // 2
+        + 60
+    )
 
-        for s in range(ratings[idx]):
-            sx = stars_x + s * (scaled_star_size + star_spacing)
-            collage.paste(star_resized, (sx, stars_y), star_resized)
+    def paste_rating_stars(
+        rating,
+        x,
+        y,
+        available_width,
+        star_size,
+    ):
+        """
+        Draw full and half stars.
 
-        # Review text truncation logic
-        raw_review = user_reviews[idx]
-        if cols >= 4:
+        A half-star is rendered by showing only the left half of the
+        existing star image, so a second asset is not required.
+        """
+
+        rating = max(0.0, min(5.0, float(rating)))
+
+        full_stars = int(rating)
+        has_half_star = (rating - full_stars) >= 0.25
+        displayed_stars = full_stars + (1 if has_half_star else 0)
+
+        if displayed_stars == 0:
+            return
+
+        resized_star = star_image.resize(
+            (star_size, star_size),
+            Image.Resampling.LANCZOS,
+        )
+
+        total_width = (
+            displayed_stars * star_size
+            + (displayed_stars - 1) * star_spacing
+        )
+
+        start_x = x + (available_width - total_width) // 2
+
+        for star_number in range(full_stars):
+            star_x = start_x + star_number * (
+                star_size + star_spacing
+            )
+
+            collage.paste(
+                resized_star,
+                (star_x, y),
+                resized_star,
+            )
+
+        if has_half_star:
+            star_x = start_x + full_stars * (
+                star_size + star_spacing
+            )
+
+            half_width = max(1, star_size // 2)
+
+            half_star = resized_star.crop(
+                (0, 0, half_width, star_size)
+            )
+
+            collage.paste(
+                half_star,
+                (star_x, y),
+                half_star,
+            )
+
+    for index, image in enumerate(resized_images):
+        row = index // columns
+        column = index % columns
+
+        cell_x = offset_x + column * (
+            cell_width + padding
+        )
+
+        cell_y = offset_y + row * (
+            cell_height + padding
+        )
+
+        image_width, image_height = image.size
+
+        image_x = (
+            cell_x
+            + (cell_width - image_width) // 2
+        )
+
+        image_y = (
+            cell_y
+            + (max_image_height - image_height) // 2
+        )
+
+        shadow = Image.new(
+            "RGBA",
+            image.size,
+            (50, 50, 50, 180),
+        )
+
+        shadow = shadow.filter(
+            ImageFilter.GaussianBlur(radius=5)
+        )
+
+        collage.paste(
+            shadow,
+            (image_x + 10, image_y + 10),
+            shadow,
+        )
+
+        collage.paste(
+            image,
+            (image_x, image_y),
+            image,
+        )
+
+        star_size = get_scaled_star_size(image_height)
+        star_y = image_y + image_height - star_size - 12
+
+        paste_rating_stars(
+            rating=ratings[index],
+            x=cell_x,
+            y=star_y,
+            available_width=cell_width,
+            star_size=star_size,
+        )
+
+        raw_review = reviews[index]
+
+        if columns >= 4:
             review_text = ""
         else:
-            char_limit = {1: 80, 2: 45, 3: 27}.get(cols, 0)
-            review_text = raw_review if len(raw_review) <= char_limit else raw_review[:char_limit - 1] + "…"
+            character_limit = {
+                1: 80,
+                2: 45,
+                3: 27,
+            }.get(columns, 0)
+
+            if len(raw_review) <= character_limit:
+                review_text = raw_review
+            else:
+                review_text = (
+                    raw_review[:character_limit - 1]
+                    + "…"
+                )
 
         if review_text:
-            bbox = draw.textbbox((0, 0), review_text, font=title_font)
-            title_w = bbox[2] - bbox[0]
-            title_x = x + (max_image_width - title_w) // 2
+            bounding_box = draw.textbbox(
+                (0, 0),
+                review_text,
+                font=review_font,
+            )
 
-            # Dynamically position review text
-            box_bottom = y + max_image_height
-            img_bottom = img_y + img_h
-            text_space = box_bottom - img_bottom
-            buffer_above = max(5, text_space // 2)
-            title_y = img_bottom + buffer_above
-            title_y = min(title_y, canvas_height - margin - title_font_size)
+            text_width = (
+                bounding_box[2] - bounding_box[0]
+            )
 
-            draw.text((title_x + 1, title_y + 1), review_text, font=title_font, fill="black")
-            draw.text((title_x, title_y), review_text, font=title_font, fill="white")
+            text_x = (
+                cell_x
+                + (cell_width - text_width) // 2
+            )
 
-    # Header
-    user_name = os.getenv("USER_NAME", "")
-    title_prefix = f"{user_name}'s " if user_name else ""
-    header_text = f"{title_prefix}{datetime(year, month, 1).strftime('%B')} Reads"
+            text_y = (
+                cell_y
+                + max_image_height
+                + 10
+            )
+
+            draw.text(
+                (text_x + 1, text_y + 1),
+                review_text,
+                font=review_font,
+                fill="black",
+            )
+
+            draw.text(
+                (text_x, text_y),
+                review_text,
+                font=review_font,
+                fill="white",
+            )
+
     header_font_size = 48
+
     try:
-        header_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=header_font_size)
+        header_font = ImageFont.truetype(
+            "DejaVuSans-Bold.ttf",
+            size=header_font_size,
+        )
     except Exception:
         header_font = ImageFont.load_default()
 
-    header_bbox = draw.textbbox((0, 0), header_text, font=header_font)
-    header_w = header_bbox[2] - header_bbox[0]
-    header_x = (canvas_width - header_w) // 2
+    header_box = draw.textbbox(
+        (0, 0),
+        header_text,
+        font=header_font,
+    )
+
+    header_width = header_box[2] - header_box[0]
+    header_x = (canvas_width - header_width) // 2
     header_y = margin
-    draw.text((header_x + 1, header_y + 1), header_text, font=header_font, fill="black")
-    draw.text((header_x, header_y), header_text, font=header_font, fill="white")
 
-    # Save
-    collage_filename = f"{year:04d}-{month:02d}.jpg"
-    output_path = Path("collages") / collage_filename
-    output_path.parent.mkdir(exist_ok=True)
-    collage.save(output_path)
-    print(f"✅ Collage saved to {output_path}")
+    draw.text(
+        (header_x + 1, header_y + 1),
+        header_text,
+        font=header_font,
+        fill="black",
+    )
+
+    draw.text(
+        (header_x, header_y),
+        header_text,
+        font=header_font,
+        fill="white",
+    )
+
+    output_directory = Path("collages")
+    output_directory.mkdir(exist_ok=True)
+
+    output_path = output_directory / output_filename
+
+    collage.save(
+        output_path,
+        quality=95,
+        subsampling=0,
+    )
+
+    print(
+        f"Collage saved to {output_path} "
+        f"using {len(included_books)} books"
+    )
+
+    return output_path
 
 
 
-# Temporary Widget parser test
 if __name__ == "__main__":
     if not WIDGET_URL:
         raise ValueError(
@@ -336,3 +606,28 @@ if __name__ == "__main__":
     save_books_json(books, output_path)
 
     print(f"\nSaved parsed books to {output_path}")
+
+    # The widget is ordered by date_read descending.
+    # For this milestone, use the newest books only.
+    test_book_count = int(
+        os.getenv("TEST_BOOK_COUNT", "9")
+    )
+
+    test_books = books[:test_book_count]
+
+    print(
+        f"\nDownloading covers for the first "
+        f"{len(test_books)} books..."
+    )
+
+    for book in test_books:
+        download_cover_if_missing(book)
+
+    user_name = os.getenv("USER_NAME", "")
+    title_prefix = f"{user_name}'s " if user_name else ""
+
+    create_collage(
+        books=test_books,
+        output_filename="widget-test.jpg",
+        header_text=f"{title_prefix}Widget Test",
+    )
