@@ -1,27 +1,13 @@
-import os
-import requests
-import math
-from datetime import date, datetime, timedelta
-from pathlib import Path
-import xml.etree.ElementTree as ET
-from urllib.parse import urlparse
-import re
-from dateutil import parser as date_parser  
-from calendar import monthrange
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
-from collections import defaultdict
 import argparse
-
+import os
+import re
+from datetime import date, datetime
 from pathlib import Path
 
-from goodreads_widget import (
-    calculate_book_hash,
-    extract_widget_html,
-    fetch_widget,
-    parse_widget_books,
-    save_books_json,
-)
+import requests
+from PIL import Image
 
+from collage_generator import create_collage
 from database import (
     connect_database,
     create_candidate_read,
@@ -35,133 +21,83 @@ from database import (
     set_setting,
     upsert_book,
 )
+from goodreads_widget import (
+    calculate_book_hash,
+    extract_widget_html,
+    fetch_widget,
+    parse_widget_books,
+    save_books_json,
+)
 
+
+# ---------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------
 
 WIDGET_URL = os.getenv("GOODREADS_WIDGET_URL", "")
-DATA_DIR = Path(
-    os.getenv("DATA_DIR", "data")
-)
+
+DATA_DIR = Path(os.getenv("DATA_DIR", "data"))
 DATABASE_PATH = DATA_DIR / "gr-reports.db"
 
-# Configuration
-FEED_URL = os.getenv("GOODREADS_RSS_URL", "https://www.goodreads.com/review/list_rss/5672051?shelf=read")
-# XML files, limited to one per 24 hours. 
-CACHE_DIR = Path("rss_cache")
-CACHE_DIR.mkdir(exist_ok=True)
-# Cover directory. 
-COVER_DIR = Path("covers")
-COVER_DIR.mkdir(exist_ok=True)
+CACHE_DIR = Path(os.getenv("WIDGET_CACHE_DIR", "widget_cache"))
+COVER_DIR = Path(os.getenv("COVER_DIR", "covers"))
+COLLAGE_DIR = Path(os.getenv("COLLAGE_DIR", "collages"))
 
-def get_latest_feed_file():
-    files = sorted(CACHE_DIR.glob("rss_*.xml"), reverse=True)
-    return files[0] if files else None
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
+COVER_DIR.mkdir(parents=True, exist_ok=True)
+COLLAGE_DIR.mkdir(parents=True, exist_ok=True)
 
-def is_file_older_than_24_hours(file_path):
-    file_time = datetime.utcfromtimestamp(file_path.stat().st_mtime)
-    return datetime.utcnow() - file_time > timedelta(hours=24)
 
-def fetch_and_cache_feed():
-    headers = {
-        "User-Agent": "Mozilla/5.0 (compatible; RSSFetcher/1.0; +https://github.com/b-neufeld/gr-reports)"
-    }
+# ---------------------------------------------------------------------
+# Cover handling
+# ---------------------------------------------------------------------
 
-    print(f"Fetching RSS feed from {FEED_URL}")
-    response = requests.get(FEED_URL, headers=headers)
-    response.raise_for_status()
+def sanitize_filename(name: str) -> str:
+    """Convert an identifier into a safe local filename."""
 
-    filename = f"rss_{datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}.xml"
-    filepath = os.path.join(CACHE_DIR, filename)
-
-    with open(filepath, 'w', encoding='utf-8') as f:
-        f.write(response.text)
-
-    print(f"Saved new RSS feed to {filepath}")
-    return filepath
-
-def limit_cache_files(max_files=20):
-    """Keep only the newest max_files XML files in CACHE_DIR."""
-    xml_files = sorted(CACHE_DIR.glob("rss_*.xml"), key=lambda f: f.stat().st_mtime, reverse=True)
-    for old_file in xml_files[max_files:]:
-        try:
-            print(f"🗑 Removing old cache file: {old_file}")
-            old_file.unlink()
-        except Exception as e:
-            print(f"❌ Failed to remove {old_file}: {e}")
-
-def get_feed():
-    latest_file = get_latest_feed_file()
-    if latest_file and not is_file_older_than_24_hours(latest_file):
-        print(f"Using cached feed from {latest_file}")
-        return latest_file
-    return fetch_and_cache_feed()
-
-def parse_feed(file_path):
-    tree = ET.parse(file_path)
-    root = tree.getroot()
-    return root.findall("channel/item")
-
-def group_books_by_month(items):
-    books_by_month = defaultdict(list)
-    for item in items:
-        user_read_at = item.findtext("user_read_at")
-        if not user_read_at:
-            continue
-        try:
-            read_date = date_parser.parse(user_read_at).replace(tzinfo=None)
-        except Exception:
-            continue
-        year, month = read_date.year, read_date.month
-        books_by_month[(year, month)].append(item)
-    return books_by_month
-
-def get_books_read_last_month(items):
-    now = datetime.now()
-    first_of_this_month = datetime(now.year, now.month, 1)
-    last_month_end = first_of_this_month - timedelta(days=1)
-    last_month_start = datetime(last_month_end.year, last_month_end.month, 1)
-
-    recent_books = []
-
-    for item in items:
-        user_read_at = item.findtext("user_read_at")
-        if not user_read_at:
-            continue
-        try:
-            read_date = date_parser.parse(user_read_at)
-            read_date = read_date.replace(tzinfo=None)  # Strip timezone
-        except Exception:
-            continue
-
-        if last_month_start <= read_date <= last_month_end:
-            recent_books.append(item)
-
-    return recent_books
-
-def sanitize_filename(name):
     return re.sub(r"[^\w\-_.]", "_", str(name))
 
-def get_cover_path(book):
+
+def get_cover_path(book) -> Path:
     """Return the local cover path for a Book object."""
 
-    safe_book_id = sanitize_filename(book.book_id or book.review_id)
-    return COVER_DIR / f"{safe_book_id}.jpg"
+    identifier = book.book_id or book.review_id
+    safe_identifier = sanitize_filename(identifier)
+
+    return COVER_DIR / f"{safe_identifier}.jpg"
 
 
-def download_cover_if_missing(book):
-    """Download and cache a book cover."""
+def get_cover_download_urls(cover_url: str) -> list[str]:
+    """
+    Return cover URLs in order of preference.
 
-    cover_path = get_cover_path(book)
+    Goodreads Widget URLs normally contain a size suffix such as:
 
-    if cover_path.exists():
-        print(
-            f"Cover for '{book.title}' "
-            f"(ID: {book.book_id}) already exists."
-        )
-        return cover_path
+        44296243._SX98_.jpg
 
-    if not book.cover_url:
-        print(f"No cover URL available for '{book.title}'")
-        return None
+    The unsized URL often provides a larger image. Keep the original URL
+    as a fallback in case the larger version is unavailable.
+    """
+
+    if not cover_url:
+        return []
+
+    full_size_url = re.sub(
+        r"\._S[^.]*_\.jpg$",
+        ".jpg",
+        cover_url,
+    )
+
+    urls = [full_size_url]
+
+    if cover_url != full_size_url:
+        urls.append(cover_url)
+
+    return urls
+
+
+def download_image(url: str, destination: Path) -> None:
+    """Download and validate one image."""
 
     headers = {
         "User-Agent": (
@@ -171,460 +107,146 @@ def download_cover_if_missing(book):
         )
     }
 
+    temporary_path = destination.with_suffix(".download")
+
     try:
         response = requests.get(
-            book.cover_url,
+            url,
             headers=headers,
             stream=True,
             timeout=30,
         )
+
         response.raise_for_status()
 
-        content_type = response.headers.get("Content-Type", "")
+        content_type = response.headers.get(
+            "Content-Type",
+            "",
+        )
 
         if not content_type.startswith("image/"):
             raise ValueError(
-                f"Expected an image but received {content_type or 'unknown content'}"
+                "Expected an image but received "
+                f"{content_type or 'an unknown content type'}"
             )
 
-        with cover_path.open("wb") as file:
-            for chunk in response.iter_content(chunk_size=8192):
+        with temporary_path.open("wb") as file:
+            for chunk in response.iter_content(
+                chunk_size=8192
+            ):
                 if chunk:
                     file.write(chunk)
 
-        # Verify that Pillow can open the downloaded file.
-        with Image.open(cover_path) as image:
+        with Image.open(temporary_path) as image:
             image.verify()
 
-        print(
-            f"Downloaded cover for '{book.title}' "
-            f"(ID: {book.book_id})"
-        )
+        temporary_path.replace(destination)
 
-        return cover_path
+    finally:
+        if temporary_path.exists():
+            temporary_path.unlink()
 
-    except Exception as error:
-        print(f"Failed to download cover for '{book.title}': {error}")
 
-        # Remove a partial or invalid download.
-        if cover_path.exists():
+def download_cover_if_missing(book) -> Path | None:
+    """Download and cache a book cover."""
+
+    cover_path = get_cover_path(book)
+
+    if cover_path.exists():
+        try:
+            with Image.open(cover_path) as image:
+                image.verify()
+
+            print(
+                f"Cover for '{book.title}' "
+                f"(ID: {book.book_id}) already exists."
+            )
+
+            return cover_path
+
+        except Exception:
+            print(
+                f"Existing cover for '{book.title}' is invalid. "
+                "Downloading it again."
+            )
+
             cover_path.unlink()
 
+    download_urls = get_cover_download_urls(
+        book.cover_url
+    )
+
+    if not download_urls:
+        print(
+            f"No cover URL is available for "
+            f"'{book.title}'."
+        )
+
         return None
 
-def create_collage(
-    books,
-    output_filename,
-    header_text,
-):
-    """Create an Instagram Story collage from Book objects."""
+    last_error = None
 
-    canvas_width = 1080
-    canvas_height = 1920
-    margin = 20
-    padding = 30
-    review_font_size = 20
-
-    images = []
-    ratings = []
-    reviews = []
-    included_books = []
-
-    try:
-        review_font = ImageFont.truetype(
-            "DejaVuSans-Bold.ttf",
-            size=review_font_size,
-        )
-    except Exception:
-        review_font = ImageFont.load_default()
-
-    def resize_to_fit_box(image, max_width, max_height):
-        width, height = image.size
-
-        scale = min(
-            max_width / width,
-            max_height / height,
-        )
-
-        new_size = (
-            max(1, int(width * scale)),
-            max(1, int(height * scale)),
-        )
-
-        return image.resize(new_size, Image.Resampling.LANCZOS)
-
-    for book in books:
-        image_path = get_cover_path(book)
-
-        if not image_path.exists():
-            print(
-                f"Missing cover for '{book.title}' "
-                f"({book.book_id}) - skipping"
-            )
-            continue
-
+    for url in download_urls:
         try:
-            with Image.open(image_path) as source_image:
-                image = source_image.convert("RGBA")
+            download_image(
+                url=url,
+                destination=cover_path,
+            )
 
-            images.append(image)
-            ratings.append(float(book.rating or 0))
-            reviews.append(book.review or "")
-            included_books.append(book)
+            print(
+                f"Downloaded cover for '{book.title}' "
+                f"(ID: {book.book_id})"
+            )
+
+            return cover_path
 
         except Exception as error:
+            last_error = error
+
             print(
-                f"Failed to load cover for "
-                f"'{book.title}' from {image_path}: {error}"
+                f"Could not download '{book.title}' "
+                f"from {url}: {error}"
             )
-
-    if not images:
-        print("No valid cover images found for the collage.")
-        return None
-
-    number_of_images = len(images)
-
-    def determine_grid(number):
-        if number == 1:
-            return 1, 1
-        if number == 2:
-            return 2, 1
-        if number <= 4:
-            return 2, 2
-        if number <= 6:
-            return 3, 2
-        if number <= 9:
-            return 3, 3
-        if number <= 12:
-            return 4, 3
-
-        columns = min(4, int(number ** 0.5) + 1)
-        rows = math.ceil(number / columns)
-        return columns, rows
-
-    columns, rows = determine_grid(number_of_images)
-
-    available_width = (
-        canvas_width
-        - (2 * margin)
-        - ((columns - 1) * padding)
-    )
-
-    available_height = (
-        canvas_height
-        - (2 * margin)
-        - ((rows - 1) * padding)
-        - 150
-    )
-
-    cell_width = available_width // columns
-
-    # Reserve room inside each row for review text.
-    review_area_height = 55 if columns < 4 else 0
-    cell_height = available_height // rows
-    max_image_height = max(1, cell_height - review_area_height)
-
-    resized_images = [
-        resize_to_fit_box(
-            image,
-            cell_width,
-            max_image_height,
-        )
-        for image in images
-    ]
-
-    collage = Image.new(
-        "RGB",
-        (canvas_width, canvas_height),
-        (0, 0, 0),
-    )
-
-    draw = ImageDraw.Draw(collage)
-
-    star_path = Path("assets/star.png")
-
-    if not star_path.exists():
-        raise FileNotFoundError(
-            f"Star image was not found at {star_path}"
-        )
-
-    star_image = Image.open(star_path).convert("RGBA")
-
-    def get_scaled_star_size(image_height):
-        return max(
-            20,
-            min(48, int(image_height * 0.1)),
-        )
-
-    star_spacing = 8
-
-    grid_width = (
-        columns * cell_width
-        + (columns - 1) * padding
-    )
-
-    grid_height = (
-        rows * cell_height
-        + (rows - 1) * padding
-    )
-
-    offset_x = (canvas_width - grid_width) // 2
-    offset_y = (
-        (canvas_height - grid_height) // 2
-        + 60
-    )
-
-    def paste_rating_stars(
-        rating,
-        x,
-        y,
-        available_width,
-        star_size,
-    ):
-        """
-        Draw full and half stars.
-
-        A half-star is rendered by showing only the left half of the
-        existing star image, so a second asset is not required.
-        """
-
-        rating = max(0.0, min(5.0, float(rating)))
-
-        full_stars = int(rating)
-        has_half_star = (rating - full_stars) >= 0.25
-        displayed_stars = full_stars + (1 if has_half_star else 0)
-
-        if displayed_stars == 0:
-            return
-
-        resized_star = star_image.resize(
-            (star_size, star_size),
-            Image.Resampling.LANCZOS,
-        )
-
-        total_width = (
-            displayed_stars * star_size
-            + (displayed_stars - 1) * star_spacing
-        )
-
-        start_x = x + (available_width - total_width) // 2
-
-        for star_number in range(full_stars):
-            star_x = start_x + star_number * (
-                star_size + star_spacing
-            )
-
-            collage.paste(
-                resized_star,
-                (star_x, y),
-                resized_star,
-            )
-
-        if has_half_star:
-            star_x = start_x + full_stars * (
-                star_size + star_spacing
-            )
-
-            half_width = max(1, star_size // 2)
-
-            half_star = resized_star.crop(
-                (0, 0, half_width, star_size)
-            )
-
-            collage.paste(
-                half_star,
-                (star_x, y),
-                half_star,
-            )
-
-    for index, image in enumerate(resized_images):
-        row = index // columns
-        column = index % columns
-
-        cell_x = offset_x + column * (
-            cell_width + padding
-        )
-
-        cell_y = offset_y + row * (
-            cell_height + padding
-        )
-
-        image_width, image_height = image.size
-
-        image_x = (
-            cell_x
-            + (cell_width - image_width) // 2
-        )
-
-        image_y = (
-            cell_y
-            + (max_image_height - image_height) // 2
-        )
-
-        shadow = Image.new(
-            "RGBA",
-            image.size,
-            (50, 50, 50, 180),
-        )
-
-        shadow = shadow.filter(
-            ImageFilter.GaussianBlur(radius=5)
-        )
-
-        collage.paste(
-            shadow,
-            (image_x + 10, image_y + 10),
-            shadow,
-        )
-
-        collage.paste(
-            image,
-            (image_x, image_y),
-            image,
-        )
-
-        star_size = get_scaled_star_size(image_height)
-        star_y = image_y + image_height - star_size - 12
-
-        paste_rating_stars(
-            rating=ratings[index],
-            x=cell_x,
-            y=star_y,
-            available_width=cell_width,
-            star_size=star_size,
-        )
-
-        raw_review = reviews[index]
-
-        if columns >= 4:
-            review_text = ""
-        else:
-            character_limit = {
-                1: 80,
-                2: 45,
-                3: 27,
-            }.get(columns, 0)
-
-            if len(raw_review) <= character_limit:
-                review_text = raw_review
-            else:
-                review_text = (
-                    raw_review[:character_limit - 1]
-                    + "…"
-                )
-
-        if review_text:
-            bounding_box = draw.textbbox(
-                (0, 0),
-                review_text,
-                font=review_font,
-            )
-
-            text_width = (
-                bounding_box[2] - bounding_box[0]
-            )
-
-            text_x = (
-                cell_x
-                + (cell_width - text_width) // 2
-            )
-
-            text_y = (
-                cell_y
-                + max_image_height
-                + 10
-            )
-
-            draw.text(
-                (text_x + 1, text_y + 1),
-                review_text,
-                font=review_font,
-                fill="black",
-            )
-
-            draw.text(
-                (text_x, text_y),
-                review_text,
-                font=review_font,
-                fill="white",
-            )
-
-    header_font_size = 48
-
-    try:
-        header_font = ImageFont.truetype(
-            "DejaVuSans-Bold.ttf",
-            size=header_font_size,
-        )
-    except Exception:
-        header_font = ImageFont.load_default()
-
-    header_box = draw.textbbox(
-        (0, 0),
-        header_text,
-        font=header_font,
-    )
-
-    header_width = header_box[2] - header_box[0]
-    header_x = (canvas_width - header_width) // 2
-    header_y = margin
-
-    draw.text(
-        (header_x + 1, header_y + 1),
-        header_text,
-        font=header_font,
-        fill="black",
-    )
-
-    draw.text(
-        (header_x, header_y),
-        header_text,
-        font=header_font,
-        fill="white",
-    )
-
-    output_directory = Path("collages")
-    output_directory.mkdir(exist_ok=True)
-
-    output_path = output_directory / output_filename
-
-    collage.save(
-        output_path,
-        quality=95,
-        subsampling=0,
-    )
 
     print(
-        f"Collage saved to {output_path} "
-        f"using {len(included_books)} books"
+        f"Failed to download a cover for "
+        f"'{book.title}': {last_error}"
     )
 
-    return output_path
+    return None
+
+
+# ---------------------------------------------------------------------
+# Goodreads synchronization
+# ---------------------------------------------------------------------
 
 def fetch_widget_books():
     """Fetch and parse the current Goodreads Custom Widget."""
 
     if not WIDGET_URL:
         raise ValueError(
-            "GOODREADS_WIDGET_URL environment variable is not configured"
+            "GOODREADS_WIDGET_URL is not configured."
         )
 
     widget_javascript = fetch_widget(WIDGET_URL)
-    widget_html = extract_widget_html(widget_javascript)
-
-    return parse_widget_books(widget_html)
-
-
-def synchronize_widget(connection):
-    """Store the latest widget state in SQLite."""
-
-    books = fetch_widget_books()
+    widget_html = extract_widget_html(
+        widget_javascript
+    )
+    books = parse_widget_books(widget_html)
 
     if not books:
         raise ValueError(
-            "Goodreads Widget returned no parseable books. "
-            "The database was not updated."
+            "The Goodreads Widget returned no "
+            "parseable books."
         )
+
+    return books
+
+
+def synchronize_widget(connection):
+    """Store the latest Widget state in SQLite."""
+
+    books = fetch_widget_books()
 
     now = datetime.now().astimezone()
     observed_at = now.isoformat(timespec="seconds")
@@ -640,9 +262,12 @@ def synchronize_widget(connection):
         == "true"
     )
 
-    new_books = []
+    newly_discovered_books = []
 
-    for position, book in enumerate(books, start=1):
+    for position, book in enumerate(
+        books,
+        start=1,
+    ):
         content_hash = calculate_book_hash(book)
 
         is_new = upsert_book(
@@ -662,17 +287,14 @@ def synchronize_widget(connection):
             content_hash=content_hash,
         )
 
-        if is_new:
-            new_books.append(book)
+        if is_new and baseline_complete:
+            newly_discovered_books.append(book)
 
-            # The initial 100 books are reference data, not 100 books
-            # read today. Only later additions become candidates.
-            if baseline_complete:
-                create_candidate_read(
-                    connection,
-                    book.review_id,
-                    observed_date,
-                )
+            create_candidate_read(
+                connection=connection,
+                review_id=book.review_id,
+                observed_date=observed_date,
+            )
 
     if not baseline_complete:
         set_setting(
@@ -686,15 +308,12 @@ def synchronize_widget(connection):
             f"{len(books)} books."
         )
 
-        # Baseline books are existing history, not newly detected reads.
-        newly_discovered_books = []
-
     else:
-        newly_discovered_books = new_books
-
         print(
-            f"Widget sync complete: {len(books)} observed, "
-            f"{len(newly_discovered_books)} newly discovered."
+            f"Widget sync complete: "
+            f"{len(books)} observed, "
+            f"{len(newly_discovered_books)} "
+            "newly discovered."
         )
 
     set_setting(
@@ -707,31 +326,49 @@ def synchronize_widget(connection):
 
     save_books_json(
         books,
-        Path("widget_cache/latest_books.json"),
+        CACHE_DIR / "latest_books.json",
     )
 
     return books, newly_discovered_books
 
 
-def print_database_status(connection):
+# ---------------------------------------------------------------------
+# Status and list output
+# ---------------------------------------------------------------------
+
+def print_database_status(connection) -> None:
     """Print a concise database summary."""
 
     counts = get_database_counts(connection)
 
     print(f"Database: {DATABASE_PATH}")
+
     print(
-        f"Last sync: "
+        "Last sync: "
         f"{get_setting(connection, 'last_sync_at', 'never')}"
     )
+
     print(f"Books: {counts['books']}")
     print(f"Read records: {counts['reads']}")
-    print(f"Confirmed reads: {counts['confirmed_reads']}")
-    print(f"Candidate reads: {counts['candidate_reads']}")
-    print(f"Observations: {counts['observations']}")
+
+    print(
+        "Confirmed reads: "
+        f"{counts['confirmed_reads']}"
+    )
+
+    print(
+        "Candidate reads: "
+        f"{counts['candidate_reads']}"
+    )
+
+    print(
+        "Observations: "
+        f"{counts['observations']}"
+    )
 
 
-def print_undated_books(connection):
-    """Print baseline books that have no read record."""
+def print_undated_books(connection) -> None:
+    """Print baseline books without read records."""
 
     rows = list_undated_books(connection)
 
@@ -740,7 +377,8 @@ def print_undated_books(connection):
         return
 
     print(
-        f"{len(rows)} baseline books do not have a read date:\n"
+        f"{len(rows)} baseline books do not "
+        "have a read date:\n"
     )
 
     for row in rows:
@@ -752,17 +390,22 @@ def print_undated_books(connection):
         )
 
 
-def print_candidate_reads(connection):
-    """Print automatically detected reads awaiting confirmation."""
+def print_candidate_reads(connection) -> None:
+    """Print automatically detected candidate reads."""
 
     rows = list_candidate_reads(connection)
 
     if not rows:
-        print("No candidate reads require confirmation.")
+        print(
+            "No candidate reads require "
+            "confirmation."
+        )
+
         return
 
     print(
-        f"{len(rows)} candidate reads require confirmation:\n"
+        f"{len(rows)} candidate reads require "
+        "confirmation:\n"
     )
 
     for row in rows:
@@ -773,13 +416,89 @@ def print_candidate_reads(connection):
             f"{row['author']}"
         )
 
+
+# ---------------------------------------------------------------------
+# Collage generation
+# ---------------------------------------------------------------------
+
+def generate_month(
+    connection,
+    year: int,
+    month: int,
+) -> Path | None:
+    """Generate a collage for one month."""
+
+    books = get_books_for_month(
+        connection,
+        year,
+        month,
+    )
+
+    if not books:
+        print(
+            f"No confirmed reads were found for "
+            f"{year:04d}-{month:02d}."
+        )
+
+        return None
+
+    available_books = []
+
+    for book in books:
+        cover_path = download_cover_if_missing(book)
+
+        if cover_path is not None:
+            available_books.append(book)
+
+    if not available_books:
+        print(
+            "No books with valid covers are "
+            "available for this collage."
+        )
+
+        return None
+
+    user_name = os.getenv("USER_NAME", "")
+
+    title_prefix = (
+        f"{user_name}'s "
+        if user_name
+        else ""
+    )
+
+    month_name = datetime(
+        year,
+        month,
+        1,
+    ).strftime("%B")
+
+    header_text = (
+        f"{title_prefix}{month_name} Reads"
+    )
+
+    output_path = COLLAGE_DIR / (
+        f"{year:04d}-{month:02d}.jpg"
+    )
+
+    return create_collage(
+        books=available_books,
+        cover_path_function=get_cover_path,
+        output_path=output_path,
+        header_text=header_text,
+    )
+
+
+# ---------------------------------------------------------------------
+# Command-line interface
+# ---------------------------------------------------------------------
+
 def build_argument_parser():
     """Create the command-line interface."""
 
     parser = argparse.ArgumentParser(
         description=(
-            "Create Goodreads reading collages from a "
-            "Goodreads Custom Widget."
+            "Create Goodreads reading collages "
+            "from a Goodreads et."
         )
     )
 
@@ -790,27 +509,41 @@ def build_argument_parser():
 
     commands.add_parser(
         "sync",
-        help="Fetch the Goodreads Widget and update the database.",
+        help=(
+            "Fetch the Goodreads Widget and "
+            "update the database."
+        ),
     )
 
     commands.add_parser(
         "status",
-        help="Show database and synchronization status.",
+        help=(
+            "Show database and synchronization "
+            "status."
+        ),
     )
 
     commands.add_parser(
         "list-undated",
-        help="List baseline books without a read date.",
+        help=(
+            "List baseline books without "
+            "a read date."
+        ),
     )
 
     commands.add_parser(
         "list-candidates",
-        help="List newly detected reads awaiting confirmation.",
+        help=(
+            "List newly detected reads awaiting "
+            "confirmation."
+        ),
     )
 
     set_date_parser = commands.add_parser(
         "set-date",
-        help="Assign and confirm a read date.",
+        help=(
+            "Assign and confirm a read date."
+        ),
     )
 
     set_date_parser.add_argument(
@@ -825,7 +558,9 @@ def build_argument_parser():
 
     generate_parser = commands.add_parser(
         "generate",
-        help="Generate a collage for one month.",
+        help=(
+            "Generate a collage for one month."
+        ),
     )
 
     generate_parser.add_argument(
@@ -842,21 +577,25 @@ def build_argument_parser():
     return parser
 
 
-def main():
+def main() -> None:
     """Run the requested command."""
 
     parser = build_argument_parser()
     arguments = parser.parse_args()
 
-    connection = connect_database(DATABASE_PATH)
+    connection = connect_database(
+        DATABASE_PATH
+    )
 
     try:
         if arguments.command == "sync":
-            books, new_books = synchronize_widget(connection)
+            books, new_books = synchronize_widget(
+                connection
+            )
 
             print(
                 f"Stored the latest state of "
-                f"{len(books)} widget books."
+                f"{len(books)} Widget books."
             )
 
             if new_books:
@@ -883,15 +622,17 @@ def main():
                 parsed_date = date.fromisoformat(
                     arguments.date_read
                 )
+
             except ValueError:
                 parser.error(
-                    "date_read must use YYYY-MM-DD format"
+                    "date_read must use "
+                    "YYYY-MM-DD format"
                 )
 
             read_id = set_read_date(
-                connection,
-                arguments.review_id,
-                parsed_date,
+                connection=connection,
+                review_id=arguments.review_id,
+                date_read=parsed_date,
             )
 
             print(
@@ -901,43 +642,10 @@ def main():
             )
 
         elif arguments.command == "generate":
-            month_books = get_books_for_month(
-                connection,
-                arguments.year,
-                arguments.month,
-            )
-
-            if not month_books:
-                print(
-                    f"No confirmed reads found for "
-                    f"{arguments.year:04d}-"
-                    f"{arguments.month:02d}."
-                )
-                return
-
-            for book in month_books:
-                download_cover_if_missing(book)
-
-            user_name = os.getenv("USER_NAME", "")
-            title_prefix = (
-                f"{user_name}'s "
-                if user_name
-                else ""
-            )
-
-            header_text = (
-                f"{title_prefix}"
-                f"{datetime(arguments.year, arguments.month, 1):%B} "
-                f"Reads"
-            )
-
-            create_collage(
-                books=month_books,
-                output_filename=(
-                    f"{arguments.year:04d}-"
-                    f"{arguments.month:02d}.jpg"
-                ),
-                header_text=header_text,
+            generate_month(
+                connection=connection,
+                year=arguments.year,
+                month=arguments.month,
             )
 
     finally:
