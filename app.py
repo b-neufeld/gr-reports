@@ -11,6 +11,15 @@ from calendar import monthrange
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from collections import defaultdict
 
+from pathlib import Path
+from goodreads_widget import (
+    extract_widget_html,
+    fetch_widget,
+    parse_widget_books,
+    save_books_json,
+)
+
+WIDGET_URL = os.getenv("GOODREADS_WIDGET_URL", "")
 
 # Configuration
 FEED_URL = os.getenv("GOODREADS_RSS_URL", "https://www.goodreads.com/review/list_rss/5672051?shelf=read")
@@ -299,29 +308,31 @@ def create_collage(books, year, month):
     collage.save(output_path)
     print(f"✅ Collage saved to {output_path}")
 
-# Run logic
+
+
+# Temporary Widget parser test
 if __name__ == "__main__":
-    feed_file = get_feed()
+    if not WIDGET_URL:
+        raise ValueError(
+            "GOODREADS_WIDGET_URL environment variable is not configured"
+        )
 
-    limit_cache_files(max_files=20)
+    widget_javascript = fetch_widget(WIDGET_URL)
+    widget_html = extract_widget_html(widget_javascript)
+    books = parse_widget_books(widget_html)
 
-    items = parse_feed(feed_file)
-    print(f"Feed file: {feed_file}")
+    print(f"\nParsed {len(books)} books\n")
 
-    books_by_month = group_books_by_month(items)
+    for book in books[:10]:
+        print(
+            f"{book.rating:.1f} stars | "
+            f"{book.title} | "
+            f"{book.author} | "
+            f"review {book.review_id} | "
+            f"book {book.book_id}"
+        )
 
-    all_books = [book for books in books_by_month.values() for book in books]
-    print(f"Total books with read dates: {len(all_books)}")
+    output_path = Path("widget_cache/latest_books.json")
+    save_books_json(books, output_path)
 
-    # Download covers (once per book)
-    seen_ids = set()
-    for book in all_books:
-        book_id = book.findtext("book_id")
-        if book_id and book_id not in seen_ids:
-            download_cover_if_missing(book)
-            seen_ids.add(book_id)
-
-    # Create a collage per month
-    for (year, month), books in sorted(books_by_month.items()):
-        print(f"Creating collage for {datetime(year, month, 1).strftime('%B %Y')} ({len(books)} books)")
-        create_collage(books, year, month)
+    print(f"\nSaved parsed books to {output_path}")

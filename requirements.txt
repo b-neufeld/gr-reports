@@ -2,3 +2,5 @@ requests
 python-dateutil
 Pillow
 flask
+beautifulsoup4
+pytest
