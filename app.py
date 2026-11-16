@@ -1,7 +1,7 @@
 import os
 import requests
 import math
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 import xml.etree.ElementTree as ET
 from urllib.parse import urlparse
@@ -10,16 +10,38 @@ from dateutil import parser as date_parser
 from calendar import monthrange
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from collections import defaultdict
+import argparse
 
 from pathlib import Path
+
 from goodreads_widget import (
+    calculate_book_hash,
     extract_widget_html,
     fetch_widget,
     parse_widget_books,
     save_books_json,
 )
 
+from database import (
+    connect_database,
+    create_candidate_read,
+    get_books_for_month,
+    get_database_counts,
+    get_setting,
+    list_candidate_reads,
+    list_undated_books,
+    record_observation,
+    set_read_date,
+    set_setting,
+    upsert_book,
+)
+
+
 WIDGET_URL = os.getenv("GOODREADS_WIDGET_URL", "")
+DATA_DIR = Path(
+    os.getenv("DATA_DIR", "data")
+)
+DATABASE_PATH = DATA_DIR / "gr-reports.db"
 
 # Configuration
 FEED_URL = os.getenv("GOODREADS_RSS_URL", "https://www.goodreads.com/review/list_rss/5672051?shelf=read")
@@ -579,9 +601,9 @@ def create_collage(
 
     return output_path
 
+def fetch_widget_books():
+    """Fetch and parse the current Goodreads Custom Widget."""
 
-
-if __name__ == "__main__":
     if not WIDGET_URL:
         raise ValueError(
             "GOODREADS_WIDGET_URL environment variable is not configured"
@@ -589,45 +611,338 @@ if __name__ == "__main__":
 
     widget_javascript = fetch_widget(WIDGET_URL)
     widget_html = extract_widget_html(widget_javascript)
-    books = parse_widget_books(widget_html)
 
-    print(f"\nParsed {len(books)} books\n")
+    return parse_widget_books(widget_html)
 
-    for book in books[:10]:
-        print(
-            f"{book.rating:.1f} stars | "
-            f"{book.title} | "
-            f"{book.author} | "
-            f"review {book.review_id} | "
-            f"book {book.book_id}"
+
+def synchronize_widget(connection):
+    """Store the latest widget state in SQLite."""
+
+    books = fetch_widget_books()
+
+    if not books:
+        raise ValueError(
+            "Goodreads Widget returned no parseable books. "
+            "The database was not updated."
         )
 
-    output_path = Path("widget_cache/latest_books.json")
-    save_books_json(books, output_path)
+    now = datetime.now().astimezone()
+    observed_at = now.isoformat(timespec="seconds")
+    observed_date = now.date().isoformat()
+    sync_id = now.strftime("%Y%m%dT%H%M%S%z")
 
-    print(f"\nSaved parsed books to {output_path}")
-
-    # The widget is ordered by date_read descending.
-    # For this milestone, use the newest books only.
-    test_book_count = int(
-        os.getenv("TEST_BOOK_COUNT", "9")
+    baseline_complete = (
+        get_setting(
+            connection,
+            "baseline_complete",
+            "false",
+        )
+        == "true"
     )
 
-    test_books = books[:test_book_count]
+    new_books = []
+
+    for position, book in enumerate(books, start=1):
+        content_hash = calculate_book_hash(book)
+
+        is_new = upsert_book(
+            connection=connection,
+            book=book,
+            observed_at=observed_at,
+            position=position,
+            content_hash=content_hash,
+        )
+
+        record_observation(
+            connection=connection,
+            sync_id=sync_id,
+            observed_at=observed_at,
+            review_id=book.review_id,
+            position=position,
+            content_hash=content_hash,
+        )
+
+        if is_new:
+            new_books.append(book)
+
+            # The initial 100 books are reference data, not 100 books
+            # read today. Only later additions become candidates.
+            if baseline_complete:
+                create_candidate_read(
+                    connection,
+                    book.review_id,
+                    observed_date,
+                )
+
+    if not baseline_complete:
+        set_setting(
+            connection,
+            "baseline_complete",
+            "true",
+        )
+
+        print(
+            f"Established initial baseline with "
+            f"{len(books)} books."
+        )
+
+        # Baseline books are existing history, not newly detected reads.
+        newly_discovered_books = []
+
+    else:
+        newly_discovered_books = new_books
+
+        print(
+            f"Widget sync complete: {len(books)} observed, "
+            f"{len(newly_discovered_books)} newly discovered."
+        )
+
+    set_setting(
+        connection,
+        "last_sync_at",
+        observed_at,
+    )
+
+    connection.commit()
+
+    save_books_json(
+        books,
+        Path("widget_cache/latest_books.json"),
+    )
+
+    return books, newly_discovered_books
+
+
+def print_database_status(connection):
+    """Print a concise database summary."""
+
+    counts = get_database_counts(connection)
+
+    print(f"Database: {DATABASE_PATH}")
+    print(
+        f"Last sync: "
+        f"{get_setting(connection, 'last_sync_at', 'never')}"
+    )
+    print(f"Books: {counts['books']}")
+    print(f"Read records: {counts['reads']}")
+    print(f"Confirmed reads: {counts['confirmed_reads']}")
+    print(f"Candidate reads: {counts['candidate_reads']}")
+    print(f"Observations: {counts['observations']}")
+
+
+def print_undated_books(connection):
+    """Print baseline books that have no read record."""
+
+    rows = list_undated_books(connection)
+
+    if not rows:
+        print("No undated baseline books found.")
+        return
 
     print(
-        f"\nDownloading covers for the first "
-        f"{len(test_books)} books..."
+        f"{len(rows)} baseline books do not have a read date:\n"
     )
 
-    for book in test_books:
-        download_cover_if_missing(book)
+    for row in rows:
+        print(
+            f"{row['review_id']} | "
+            f"{row['rating']:.1f} | "
+            f"{row['title']} | "
+            f"{row['author']}"
+        )
 
-    user_name = os.getenv("USER_NAME", "")
-    title_prefix = f"{user_name}'s " if user_name else ""
 
-    create_collage(
-        books=test_books,
-        output_filename="widget-test.jpg",
-        header_text=f"{title_prefix}Widget Test",
+def print_candidate_reads(connection):
+    """Print automatically detected reads awaiting confirmation."""
+
+    rows = list_candidate_reads(connection)
+
+    if not rows:
+        print("No candidate reads require confirmation.")
+        return
+
+    print(
+        f"{len(rows)} candidate reads require confirmation:\n"
     )
+
+    for row in rows:
+        print(
+            f"{row['review_id']} | "
+            f"{row['date_read']} | "
+            f"{row['title']} | "
+            f"{row['author']}"
+        )
+
+def build_argument_parser():
+    """Create the command-line interface."""
+
+    parser = argparse.ArgumentParser(
+        description=(
+            "Create Goodreads reading collages from a "
+            "Goodreads Custom Widget."
+        )
+    )
+
+    commands = parser.add_subparsers(
+        dest="command",
+        required=True,
+    )
+
+    commands.add_parser(
+        "sync",
+        help="Fetch the Goodreads Widget and update the database.",
+    )
+
+    commands.add_parser(
+        "status",
+        help="Show database and synchronization status.",
+    )
+
+    commands.add_parser(
+        "list-undated",
+        help="List baseline books without a read date.",
+    )
+
+    commands.add_parser(
+        "list-candidates",
+        help="List newly detected reads awaiting confirmation.",
+    )
+
+    set_date_parser = commands.add_parser(
+        "set-date",
+        help="Assign and confirm a read date.",
+    )
+
+    set_date_parser.add_argument(
+        "review_id",
+        help="Goodreads review ID.",
+    )
+
+    set_date_parser.add_argument(
+        "date_read",
+        help="Read date in YYYY-MM-DD format.",
+    )
+
+    generate_parser = commands.add_parser(
+        "generate",
+        help="Generate a collage for one month.",
+    )
+
+    generate_parser.add_argument(
+        "year",
+        type=int,
+    )
+
+    generate_parser.add_argument(
+        "month",
+        type=int,
+        choices=range(1, 13),
+    )
+
+    return parser
+
+
+def main():
+    """Run the requested command."""
+
+    parser = build_argument_parser()
+    arguments = parser.parse_args()
+
+    connection = connect_database(DATABASE_PATH)
+
+    try:
+        if arguments.command == "sync":
+            books, new_books = synchronize_widget(connection)
+
+            print(
+                f"Stored the latest state of "
+                f"{len(books)} widget books."
+            )
+
+            if new_books:
+                print("\nNew books:")
+
+                for book in new_books:
+                    print(
+                        f"{book.review_id} | "
+                        f"{book.title} | "
+                        f"{book.author}"
+                    )
+
+        elif arguments.command == "status":
+            print_database_status(connection)
+
+        elif arguments.command == "list-undated":
+            print_undated_books(connection)
+
+        elif arguments.command == "list-candidates":
+            print_candidate_reads(connection)
+
+        elif arguments.command == "set-date":
+            try:
+                parsed_date = date.fromisoformat(
+                    arguments.date_read
+                )
+            except ValueError:
+                parser.error(
+                    "date_read must use YYYY-MM-DD format"
+                )
+
+            read_id = set_read_date(
+                connection,
+                arguments.review_id,
+                parsed_date,
+            )
+
+            print(
+                f"Confirmed read {read_id}: "
+                f"review {arguments.review_id} "
+                f"on {parsed_date.isoformat()}."
+            )
+
+        elif arguments.command == "generate":
+            month_books = get_books_for_month(
+                connection,
+                arguments.year,
+                arguments.month,
+            )
+
+            if not month_books:
+                print(
+                    f"No confirmed reads found for "
+                    f"{arguments.year:04d}-"
+                    f"{arguments.month:02d}."
+                )
+                return
+
+            for book in month_books:
+                download_cover_if_missing(book)
+
+            user_name = os.getenv("USER_NAME", "")
+            title_prefix = (
+                f"{user_name}'s "
+                if user_name
+                else ""
+            )
+
+            header_text = (
+                f"{title_prefix}"
+                f"{datetime(arguments.year, arguments.month, 1):%B} "
+                f"Reads"
+            )
+
+            create_collage(
+                books=month_books,
+                output_filename=(
+                    f"{arguments.year:04d}-"
+                    f"{arguments.month:02d}.jpg"
+                ),
+                header_text=header_text,
+            )
+
+    finally:
+        connection.close()
+
+
+if __name__ == "__main__":
+    main()

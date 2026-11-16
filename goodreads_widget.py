@@ -5,6 +5,7 @@ import re
 from dataclasses import asdict
 from pathlib import Path
 from urllib.parse import urlparse
+import hashlib
 
 import requests
 from bs4 import BeautifulSoup
@@ -333,3 +334,23 @@ def save_books_json(books: list[Book], output_path: Path) -> None:
             indent=2,
             default=str,
         )
+
+def calculate_book_hash(book: Book) -> str:
+    """Create a stable hash of widget-controlled book metadata."""
+
+    hash_input = "\n".join(
+        [
+            book.review_id,
+            book.book_id,
+            book.title,
+            book.author,
+            str(book.rating),
+            book.review,
+            "\n".join(book.tags),
+            book.cover_url,
+        ]
+    )
+
+    return hashlib.sha256(
+        hash_input.encode("utf-8")
+    ).hexdigest()
