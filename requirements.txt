@@ -1,6 +1,5 @@
 requests
-python-dateutil
 Pillow
-flask
+Flask
 beautifulsoup4
 gunicorn
