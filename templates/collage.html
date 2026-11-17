@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+
+{% block title %}
+    {{ month_name }} {{ year }} | {{ application_name }}
+{% endblock %}
+
+{% block content %}
+<section class="page-heading">
+    <div>
+        <h1>{{ month_name }} {{ year }}</h1>
+
+        <p class="muted">
+            {{ books|length }}
+            confirmed
+            {% if books|length == 1 %}read{% else %}reads{% endif %}
+        </p>
+    </div>
+
+    <form
+        method="post"
+        action="{{ url_for(
+            'generate_collage_route',
+            year=year,
+            month=month
+        ) }}"
+    >
+        <button
+            class="button"
+            type="submit"
+            {% if not books %}disabled{% endif %}
+        >
+            {% if collage_exists %}
+                Regenerate collage
+            {% else %}
+                Generate collage
+            {% endif %}
+        </button>
+    </form>
+</section>
+
+<nav class="month-navigation">
+    <a
+        class="button button--secondary"
+        href="{{ url_for(
+            'collage_month',
+            year=previous_year,
+            month=previous_month
+        ) }}"
+    >
+        ← Previous month
+    </a>
+
+    <a
+        class="button button--secondary"
+        href="{{ url_for(
+            'collage_month',
+            year=next_year,
+            month=next_month
+        ) }}"
+    >
+        Next month →
+    </a>
+</nav>
+
+<div class="collage-layout">
+    <section class="panel">
+        <h2>Included books</h2>
+
+        {% if books %}
+            <div class="book-list">
+                {% for book in books %}
+                    <article class="book-row">
+                        <div>
+                            <strong>{{ book.title }}</strong>
+
+                            <div class="muted">
+                                {{ book.author }}
+                            </div>
+                        </div>
+
+                        <div class="book-row__meta">
+                            {{ book.read_date }}
+                            · {{ "%.1f"|format(book.rating) }} stars
+                        </div>
+                    </article>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p class="empty-state">
+                No confirmed reads are assigned to this month.
+                Add or correct dates on the Reads page first.
+            </p>
+        {% endif %}
+    </section>
+
+    <section class="panel">
+        <h2>Preview</h2>
+
+        {% if collage_exists %}
+            <a
+                class="collage-preview"
+                href="{{ url_for(
+                    'collage_file',
+                    filename=filename
+                ) }}"
+            >
+                <img
+                    src="{{ url_for(
+                        'collage_file',
+                        filename=filename
+                    ) }}"
+                    alt="{{ filename }}"
+                >
+            </a>
+
+            <a
+                class="button button--secondary button--full"
+                href="{{ url_for(
+                    'collage_file',
+                    filename=filename,
+                    download=1
+                ) }}"
+            >
+                Download {{ filename }}
+            </a>
+        {% else %}
+            <p class="empty-state">
+                This collage has not been generated.
+            </p>
+        {% endif %}
+    </section>
+</div>
+{% endblock %}

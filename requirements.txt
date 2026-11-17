@@ -3,4 +3,4 @@ python-dateutil
 Pillow
 flask
 beautifulsoup4
-pytest
+gunicorn
