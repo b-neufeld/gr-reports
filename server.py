@@ -43,10 +43,15 @@ from database import (
 
 app = Flask(__name__)
 
-app.config["SECRET_KEY"] = os.getenv(
-    "FLASK_SECRET_KEY",
-    "development-only-change-me",
-)
+flask_secret_key = os.getenv("FLASK_SECRET_KEY")
+
+if not flask_secret_key:
+    raise RuntimeError(
+        "FLASK_SECRET_KEY is required. "
+        "Set it to a long random value in the environment."
+    )
+
+app.config["SECRET_KEY"] = flask_secret_key
 
 SYNC_INTERVAL_HOURS = int(
     os.getenv("SYNC_INTERVAL_HOURS", "24")
