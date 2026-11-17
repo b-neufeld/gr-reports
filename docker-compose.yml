@@ -18,9 +18,9 @@ services:
       COVER_DIR: "/app/covers"
       COLLAGE_DIR: "/app/collages"
 
-      ENABLE_SCHEDULED_SYNC: "false"
-      SYNC_ON_STARTUP: "false"
-      SYNC_INTERVAL_HOURS: "24"
+      ENABLE_SCHEDULED_SYNC: "${ENABLE_SCHEDULED_SYNC:-true}"
+      SYNC_ON_STARTUP: "${SYNC_ON_STARTUP:-true}"
+      SYNC_INTERVAL_HOURS: "${SYNC_INTERVAL_HOURS:-24}"
 
     volumes:
       - "${GR_REPORTS_DATA_PATH:?Set GR_REPORTS_DATA_PATH in .env}:/app/data"
@@ -29,3 +29,15 @@ services:
       - "${GR_REPORTS_COLLAGES_PATH:?Set GR_REPORTS_COLLAGES_PATH in .env}:/app/collages"
 
     restart: unless-stopped
+
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - --fail
+        - --silent
+        - http://localhost:5000/health
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

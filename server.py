@@ -668,6 +668,22 @@ def collage_file(filename):
         as_attachment=download,
     )
 
+@app.get("/health")
+def health():
+    """Return a lightweight container health response."""
+
+    connection = get_database()
+
+    try:
+        connection.execute("SELECT 1").fetchone()
+
+    finally:
+        connection.close()
+
+    return {
+        "status": "ok",
+        "database": "available",
+    }
 
 def start_scheduled_sync():
     """Start the single-process background scheduler."""
@@ -684,10 +700,12 @@ def start_scheduled_sync():
 
     thread.start()
 
+# This application runs with one Gunicorn worker. Starting the scheduler
+# when the module is imported ensures it operates under both Gunicorn and
+# the local Flask development server.
+start_scheduled_sync()
 
 if __name__ == "__main__":
-    start_scheduled_sync()
-
     app.run(
         host="0.0.0.0",
         port=5000,

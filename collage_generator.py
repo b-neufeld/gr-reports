@@ -23,9 +23,14 @@ ROW_GAP = 42
 HEADER_TOP = 24
 HEADER_HEIGHT = 105
 CONTENT_TOP = 155
-CONTENT_BOTTOM = 1885
 
 STAR_SPACING = 8
+
+REPOSITORY_URL = "https://github.com/b-neufeld/gr-reports"
+
+FOOTER_TOP = 1860
+FOOTER_FONT_SIZE = 36
+CONTENT_BOTTOM = 1830
 
 
 def load_font(
@@ -847,6 +852,20 @@ def create_collage(
                 line_height
                 + line_spacing
             )
+
+    footer_font = load_font(
+        size=FOOTER_FONT_SIZE,
+        bold=False,
+    )
+
+    draw_centered_text(
+        draw=draw,
+        text=REPOSITORY_URL,
+        center_x=CANVAS_WIDTH // 2,
+        y=FOOTER_TOP,
+        font=footer_font,
+        shadow_offset=1,
+    )
 
     output_path.parent.mkdir(
         parents=True,
