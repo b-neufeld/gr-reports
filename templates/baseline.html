@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+
+{% block title %}
+    Baseline | {{ application_name }}
+{% endblock %}
+
+{% block content %}
+<section class="page-heading">
+    <div>
+        <h1>Baseline books</h1>
+
+        <p class="muted">
+            Assign dates to books discovered during the first
+            Goodreads synchronization. Leave books blank if they
+            do not need to appear in a monthly collage.
+        </p>
+    </div>
+</section>
+
+<section class="notice">
+    <strong>{{ undated_count }} books have no read record.</strong>
+
+    <p>
+        Goodreads provides these books in newest-read-first order,
+        but the Custom Widget does not provide exact dates. Enter
+        dates only for books you want to import.
+    </p>
+</section>
+
+{% if books %}
+<form
+    method="post"
+    action="{{ url_for('import_baseline_dates') }}"
+>
+    <section class="panel">
+        <div class="panel__heading">
+            <div>
+                <h2>Assign reading dates</h2>
+
+                <p class="muted">
+                    You can enter several dates and save them all
+                    at once.
+                </p>
+            </div>
+
+            <button class="button" type="submit">
+                Import entered dates
+            </button>
+        </div>
+
+        <div class="baseline-list">
+            {% for book in books %}
+                <article class="baseline-row">
+                    <div class="baseline-row__position">
+                        {{ book.latest_position or "—" }}
+                    </div>
+
+                    <div class="baseline-row__details">
+                        <strong>{{ book.title }}</strong>
+
+                        <span class="muted">
+                            {{ book.author }}
+                            · {{ "%.1f"|format(book.rating) }} stars
+                        </span>
+
+                        <span class="baseline-row__review-id">
+                            Review {{ book.review_id }}
+                        </span>
+                    </div>
+
+                    <label class="baseline-row__date">
+                        <span class="sr-only">
+                            Date read for {{ book.title }}
+                        </span>
+
+                        <input
+                            type="date"
+                            name="read_date_{{ book.review_id }}"
+                        >
+                    </label>
+                </article>
+            {% endfor %}
+        </div>
+
+        <div class="sticky-actions">
+            <span class="muted">
+                Blank rows will be ignored.
+            </span>
+
+            <button class="button" type="submit">
+                Import entered dates
+            </button>
+        </div>
+    </section>
+</form>
+{% else %}
+<section class="panel">
+    <p class="empty-state">
+        Every known baseline book has at least one read record.
+    </p>
+</section>
+{% endif %}
+{% endblock %}

@@ -1,4 +1,13 @@
 # Folder for files not to publish to github
-goodreads_cache/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+data/
+widget_cache/
 covers/
 collages/
+
+.env

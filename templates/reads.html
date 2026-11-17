@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+
+{% block title %}
+    Reads | {{ application_name }}
+{% endblock %}
+
+{% block content %}
+<section class="page-heading">
+    <div>
+        <h1>Reads</h1>
+        <p class="muted">
+            Confirm, correct, or remove reading events.
+        </p>
+    </div>
+</section>
+
+<nav class="tabs">
+    <a
+        class="{% if status_filter == 'all' %}active{% endif %}"
+        href="{{ url_for('reads_page', status='all') }}"
+    >
+        All
+    </a>
+
+    <a
+        class="{% if status_filter == 'confirmed' %}active{% endif %}"
+        href="{{ url_for('reads_page', status='confirmed') }}"
+    >
+        Confirmed
+    </a>
+
+    <a
+        class="{% if status_filter == 'candidate' %}active{% endif %}"
+        href="{{ url_for('reads_page', status='candidate') }}"
+    >
+        Candidates
+    </a>
+</nav>
+
+<section class="panel">
+    {% if reads %}
+        <div class="read-table">
+            {% for read in reads %}
+                <article class="read-row">
+                    <div class="read-row__details">
+                        <span class="read-row__id">
+                            Read {{ read.id }}
+                        </span>
+
+                        <strong>{{ read.title }}</strong>
+
+                        <span class="muted">
+                            {{ read.author }}
+                            · {{ "%.1f"|format(read.rating) }} stars
+                            · Review {{ read.review_id }}
+                        </span>
+                    </div>
+
+                    <form
+                        class="inline-form"
+                        method="post"
+                        action="{{ url_for(
+                            'edit_read_route',
+                            read_id=read.id
+                        ) }}"
+                    >
+                        <input
+                            type="date"
+                            name="date_read"
+                            value="{{ read.date_read or '' }}"
+                            required
+                        >
+
+                        <button
+                            class="button button--small button--secondary"
+                            type="submit"
+                        >
+                            Save date
+                        </button>
+                    </form>
+
+                    <div class="read-row__actions">
+                        {% if not read.confirmed %}
+                            <form
+                                method="post"
+                                action="{{ url_for(
+                                    'confirm_read_route',
+                                    read_id=read.id
+                                ) }}"
+                            >
+                                <button
+                                    class="button button--small"
+                                    type="submit"
+                                >
+                                    Confirm
+                                </button>
+                            </form>
+                        {% else %}
+                            <span class="badge badge--success">
+                                Confirmed
+                            </span>
+                        {% endif %}
+
+                        <form
+                            method="post"
+                            action="{{ url_for(
+                                'delete_read_route',
+                                read_id=read.id
+                            ) }}"
+                            onsubmit="return confirm('Delete this read record?');"
+                        >
+                            <button
+                                class="button button--small button--danger"
+                                type="submit"
+                            >
+                                Delete
+                            </button>
+                        </form>
+                    </div>
+                </article>
+            {% endfor %}
+        </div>
+    {% else %}
+        <p class="empty-state">
+            No reads match this filter.
+        </p>
+    {% endif %}
+</section>
+
+<section class="panel">
+    <h2>Add a reread or historical read</h2>
+
+    <p class="muted">
+        Search for a known Goodreads book, then assign its
+        completed date. Existing books can have multiple reads
+        as long as the dates differ.
+    </p>
+
+    <form
+        class="form-grid"
+        method="post"
+        action="{{ url_for('add_read') }}"
+    >
+        <label>
+            Book
+
+            <select
+                name="review_id"
+                required
+            >
+                <option value="">
+                    Select a book
+                </option>
+
+                {% for book in books %}
+                    <option value="{{ book.review_id }}">
+                        {{ book.title }} — {{ book.author }}
+                    </option>
+                {% endfor %}
+            </select>
+        </label>
+
+        <label>
+            Date read
+
+            <input
+                type="date"
+                name="date_read"
+                required
+            >
+        </label>
+
+        <div class="form-actions">
+            <button class="button" type="submit">
+                Add read
+            </button>
+        </div>
+    </form>
+</section>
+{% endblock %}

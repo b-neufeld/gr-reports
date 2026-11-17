@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1"
+    >
+
+    <title>
+        {% block title %}{{ application_name }}{% endblock %}
+    </title>
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='style.css') }}"
+    >
+</head>
+
+<body>
+    <header class="site-header">
+        <div class="site-header__inner">
+            <a
+                class="brand"
+                href="{{ url_for('dashboard') }}"
+            >
+                <span class="brand__icon">📚</span>
+                <span>{{ application_name }}</span>
+            </a>
+
+            <nav class="navigation">
+                <a href="{{ url_for('dashboard') }}">
+                    Dashboard
+                </a>
+
+                <a href="{{ url_for('reads_page') }}">
+                    Reads
+                </a>
+                <a href="{{ url_for('baseline_page') }}">
+                    Baseline
+                </a>
+                <a href="{{ url_for('collages_page') }}">
+                    Collages
+                </a>
+                <a
+                    href="https://github.com/b-neufeld/gr-reports"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                >
+                    GitHub
+                </a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="page">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <section class="messages">
+                    {% for category, message in messages %}
+                        <div class="message message--{{ category }}">
+                            {{ message }}
+                        </div>
+                    {% endfor %}
+                </section>
+            {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html>
