@@ -9,16 +9,21 @@ from PIL import Image
 
 from collage_generator import create_collage
 from database import (
+    DuplicateReadError,
+    confirm_read,
     connect_database,
     create_candidate_read,
+    delete_read,
     get_books_for_month,
     get_database_counts,
     get_setting,
     list_candidate_reads,
+    list_reads,
     list_undated_books,
     record_observation,
     set_read_date,
     set_setting,
+    update_read_date,
     upsert_book,
 )
 from goodreads_widget import (
@@ -416,6 +421,37 @@ def print_candidate_reads(connection) -> None:
             f"{row['author']}"
         )
 
+def print_reads(connection) -> None:
+    """Print all stored reading events."""
+
+    rows = list_reads(connection)
+
+    if not rows:
+        print("No read records found.")
+        return
+
+    print(
+        "ID   Date         Status       Rating  Title\n"
+        "---- ------------ ------------ ------- ------------------------------"
+    )
+
+    for row in rows:
+        date_value = row["date_read"] or "undated"
+
+        status = (
+            "confirmed"
+            if row["confirmed"]
+            else "candidate"
+        )
+
+        print(
+            f"{row['id']:<4} "
+            f"{date_value:<12} "
+            f"{status:<12} "
+            f"{row['rating']:<7.1f} "
+            f"{row['title']} | "
+            f"{row['author']}"
+        )
 
 # ---------------------------------------------------------------------
 # Collage generation
@@ -538,6 +574,11 @@ def build_argument_parser():
             "confirmation."
         ),
     )
+    
+    commands.add_parser(
+        "list-reads",
+        help="List all confirmed and candidate read records.",
+    )
 
     set_date_parser = commands.add_parser(
         "set-date",
@@ -574,8 +615,60 @@ def build_argument_parser():
         choices=range(1, 13),
     )
 
+    update_read_parser = commands.add_parser(
+        "update-read",
+        help="Change and confirm the date of an existing read.",
+    )
+
+    update_read_parser.add_argument(
+        "read_id",
+        type=int,
+        help="Local read record ID.",
+    )
+
+    update_read_parser.add_argument(
+        "date_read",
+        help="New read date in YYYY-MM-DD format.",
+    )
+
+    delete_read_parser = commands.add_parser(
+        "delete-read",
+        help="Delete an incorrect read record.",
+    )
+
+    delete_read_parser.add_argument(
+        "read_id",
+        type=int,
+        help="Local read record ID.",
+    )
+
+    confirm_read_parser = commands.add_parser(
+        "confirm-read",
+        help="Confirm a candidate read using its proposed date.",
+    )
+
+    confirm_read_parser.add_argument(
+        "read_id",
+        type=int,
+        help="Local read record ID.",
+    )
+
     return parser
 
+def parse_iso_date(
+    parser,
+    value: str,
+) -> date:
+    """Parse a YYYY-MM-DD command-line value."""
+
+    try:
+        return date.fromisoformat(value)
+
+    except ValueError:
+        parser.error(
+            f"Invalid date '{value}'. "
+            "Use YYYY-MM-DD format."
+        )
 
 def main() -> None:
     """Run the requested command."""
@@ -617,28 +710,93 @@ def main() -> None:
         elif arguments.command == "list-candidates":
             print_candidate_reads(connection)
 
+        elif arguments.command == "list-reads":
+            print_reads(connection)
+
         elif arguments.command == "set-date":
-            try:
-                parsed_date = date.fromisoformat(
-                    arguments.date_read
-                )
-
-            except ValueError:
-                parser.error(
-                    "date_read must use "
-                    "YYYY-MM-DD format"
-                )
-
-            read_id = set_read_date(
-                connection=connection,
-                review_id=arguments.review_id,
-                date_read=parsed_date,
+            parsed_date = parse_iso_date(
+                parser,
+                arguments.date_read,
             )
+
+            try:
+                read_id = set_read_date(
+                    connection=connection,
+                    review_id=arguments.review_id,
+                    date_read=parsed_date,
+                )
+
+            except (
+                DuplicateReadError,
+                ValueError,
+            ) as error:
+                print(f"Not changed: {error}")
+                return
 
             print(
                 f"Confirmed read {read_id}: "
                 f"review {arguments.review_id} "
                 f"on {parsed_date.isoformat()}."
+            )
+
+        elif arguments.command == "update-read":
+            parsed_date = parse_iso_date(
+                parser,
+                arguments.date_read,
+            )
+
+            try:
+                update_read_date(
+                    connection=connection,
+                    read_id=arguments.read_id,
+                    date_read=parsed_date,
+                )
+
+            except (
+                DuplicateReadError,
+                ValueError,
+            ) as error:
+                print(f"Not changed: {error}")
+                return
+
+            print(
+                f"Updated read {arguments.read_id} "
+                f"to {parsed_date.isoformat()}."
+            )
+
+        elif arguments.command == "confirm-read":
+            try:
+                confirm_read(
+                    connection=connection,
+                    read_id=arguments.read_id,
+                )
+
+            except (
+                DuplicateReadError,
+                ValueError,
+            ) as error:
+                print(f"Not changed: {error}")
+                return
+
+            print(
+                f"Confirmed read {arguments.read_id}."
+            )
+
+        elif arguments.command == "delete-read":
+            try:
+                deleted = delete_read(
+                    connection=connection,
+                    read_id=arguments.read_id,
+                )
+
+            except ValueError as error:
+                print(f"Not changed: {error}")
+                return
+
+            print(
+                f"Deleted read {deleted['id']}: "
+                f"{deleted['title']} on "
+                f"{deleted['date_read'] or 'an unknown date'}."
             )
 
         elif arguments.command == "generate":
