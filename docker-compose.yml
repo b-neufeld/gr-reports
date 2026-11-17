@@ -1,19 +1,30 @@
-# Example Docker-Compose
 services:
   goodreads-collage:
     container_name: goodreads-collage
     image: ghcr.io/b-neufeld/gr-reports:latest
+
     ports:
-      # Port outside container : port inside container 
-      - 8010:5000 
+      - "8010:5000"
+
     environment:
-      # Example URL: https://www.goodreads.com/review/list_rss/5672051?shelf=read (see bottom of "Read" shelf page)
-      - GOODREADS_RSS_URL=https://www.goodreads.com/review/list_rss/5672051?shelf=read
-      # For header of image
-      - USER_NAME=Brahm
+      GOODREADS_WIDGET_URL: "https://www.goodreads.com/review/custom_widget/5672051.Brahm's%20bookshelf:%20read?cover_position=left&cover_size=medium&num_books=100&order=d&shelf=read&show_author=1&show_cover=1&show_rating=1&show_review=1&show_tags=1&show_title=1&sort=date_read&widget_bg_color=FFFFFF&widget_bg_transparent=&widget_border_width=1&widget_id=1794860440&widget_text_color=000000&widget_title_size=medium&widget_width=medium"
+
+      USER_NAME: "Brahm"
+      FLASK_SECRET_KEY: "cd7b7c4f089f5c1fc0072596ec117fcd31e46a7a35cd98eac59c34ca7483ef26"
+
+      DATA_DIR: "/app/data"
+      WIDGET_CACHE_DIR: "/app/widget_cache"
+      COVER_DIR: "/app/covers"
+      COLLAGE_DIR: "/app/collages"
+
+      ENABLE_SCHEDULED_SYNC: "false"
+      SYNC_ON_STARTUP: "false"
+      SYNC_INTERVAL_HOURS: "24"
+
     volumes:
-      # create and map three volumes for caching RSS feeds, book covers, and collages. 
-      - /path/to/local/storage/rss_cache:/app/rss_cache
+      - /path/to/local/storage/data:/app/data
+      - /path/to/local/storage/widget_cache:/app/widget_cache
       - /path/to/local/storage/covers:/app/covers
       - /path/to/local/storage/collages:/app/collages
+
     restart: unless-stopped
