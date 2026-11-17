@@ -34,6 +34,10 @@ from database import (
     list_reads,
     set_read_date,
     update_read_date,
+    count_undated_books,
+    list_all_books,
+    list_undated_books,
+
 )
 
 
@@ -197,6 +201,9 @@ def dashboard():
             candidates=candidates[:8],
             recent_reads=reads[:8],
             collages=collages,
+            undated_count=count_undated_books(
+                connection
+            ),
             last_sync_at=get_setting(
                 connection,
                 "last_sync_at",
@@ -232,6 +239,120 @@ def sync_goodreads():
 
     return redirect(url_for("dashboard"))
 
+@app.route("/baseline")
+def baseline_page():
+    """Show baseline books that do not yet have read records."""
+
+    connection = get_database()
+
+    try:
+        undated_books = list_undated_books(connection)
+
+        return render_template(
+            "baseline.html",
+            books=undated_books,
+            undated_count=len(undated_books),
+        )
+
+    finally:
+        connection.close()
+
+
+@app.post("/baseline/import")
+def import_baseline_dates():
+    """Create confirmed read records for submitted baseline dates."""
+
+    connection = get_database()
+
+    imported_count = 0
+    duplicate_count = 0
+    error_messages = []
+
+    try:
+        undated_books = list_undated_books(connection)
+
+        valid_review_ids = {
+            row["review_id"]
+            for row in undated_books
+        }
+
+        for field_name, field_value in request.form.items():
+            if not field_name.startswith("read_date_"):
+                continue
+
+            date_value = field_value.strip()
+
+            if not date_value:
+                continue
+
+            review_id = field_name.removeprefix(
+                "read_date_"
+            )
+
+            if review_id not in valid_review_ids:
+                error_messages.append(
+                    f"Review {review_id} is not an "
+                    "undated baseline book."
+                )
+                continue
+
+            try:
+                parsed_date = parse_date_value(
+                    date_value
+                )
+
+                set_read_date(
+                    connection=connection,
+                    review_id=review_id,
+                    date_read=parsed_date,
+                )
+
+                imported_count += 1
+
+            except DuplicateReadError:
+                duplicate_count += 1
+
+            except ValueError as error:
+                error_messages.append(
+                    f"Review {review_id}: {error}"
+                )
+
+        if imported_count:
+            flash(
+                (
+                    f"Imported {imported_count} "
+                    f"baseline "
+                    f"{'read' if imported_count == 1 else 'reads'}."
+                ),
+                "success",
+            )
+
+        if duplicate_count:
+            flash(
+                (
+                    f"Skipped {duplicate_count} duplicate "
+                    f"{'record' if duplicate_count == 1 else 'records'}."
+                ),
+                "error",
+            )
+
+        for message in error_messages[:10]:
+            flash(message, "error")
+
+        if (
+            imported_count == 0
+            and duplicate_count == 0
+            and not error_messages
+        ):
+            flash(
+                "No dates were entered. Nothing was imported.",
+                "error",
+            )
+
+    finally:
+        connection.close()
+
+    return redirect(url_for("baseline_page"))
 
 @app.route("/reads")
 def reads_page():
@@ -246,6 +367,7 @@ def reads_page():
         )
 
         rows = list_reads(connection)
+        books = list_all_books(connection)
 
         if status_filter == "confirmed":
             rows = [
@@ -267,6 +389,7 @@ def reads_page():
         return render_template(
             "reads.html",
             reads=rows,
+            books=books,
             status_filter=status_filter,
         )
 

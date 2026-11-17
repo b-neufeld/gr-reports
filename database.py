@@ -658,6 +658,54 @@ def list_undated_books(
     ).fetchall()
 
 
+def list_all_books(
+    connection: sqlite3.Connection,
+) -> list[sqlite3.Row]:
+    """Return all known books in current Goodreads Widget order."""
+
+    return connection.execute(
+        """
+        SELECT
+            review_id,
+            book_id,
+            title,
+            author,
+            rating,
+            first_seen_at,
+            last_seen_at,
+            latest_position
+        FROM books
+        ORDER BY
+            CASE
+                WHEN latest_position IS NULL THEN 1
+                ELSE 0
+            END,
+            latest_position,
+            title
+        """
+    ).fetchall()
+
+
+def count_undated_books(
+    connection: sqlite3.Connection,
+) -> int:
+    """Count books that do not have any reading event."""
+
+    row = connection.execute(
+        """
+        SELECT COUNT(*) AS count
+        FROM books b
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM reads r
+            WHERE r.review_id = b.review_id
+        )
+        """
+    ).fetchone()
+
+    return row["count"]
+
+
 def list_candidate_reads(
     connection: sqlite3.Connection,
 ) -> list[sqlite3.Row]:

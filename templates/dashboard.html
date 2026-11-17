@@ -61,6 +61,28 @@
     </article>
 </section>
 
+{% if undated_count %}
+<section class="notice notice--action">
+    <div>
+        <strong>
+            {{ undated_count }} baseline books do not have dates.
+        </strong>
+
+        <p>
+            Assign dates to recent books so they can appear in
+            monthly collages.
+        </p>
+    </div>
+
+    <a
+        class="button"
+        href="{{ url_for('baseline_page') }}"
+    >
+        Import baseline dates
+    </a>
+</section>
+{% endif %}
+
 <section class="panel">
     <div class="panel__heading">
         <div>
