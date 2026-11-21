@@ -2,15 +2,19 @@
 
 `gr-reports` creates monthly reading collages sized for Instagram Stories using data from a Goodreads Custom Widget.
 
-The project began after my sister posted monthly reading summaries by saving book covers to a folder on her phone and taking a screenshot. I liked the idea and wanted to automate it using my Goodreads data.
+The project began after my sister posted monthly reading summaries on Instagram Stories by saving book covers to a folder on her phone and taking a screenshot. I liked the idea and wanted to automate it using my Goodreads data.
 
 The original version used Goodreads RSS feeds. Goodreads removed those feeds, so version 2.0 now uses the public Goodreads Custom Widget, a local SQLite database, and a browser-based management interface.
 
 **PLEASE TAKE NOTE!** This project is 100% "AI Slop" but it is lightweight and for-fun. It was developed slowly and interatively with testing along the way instead of being one-shot. 
 
+<img width="734" height="644" alt="Screenshot 2026-11-21 075627" src="https://github.com/user-attachments/assets/25fc97e5-0839-4bf3-a3ba-2f2e84456ea4" />
+
+<img width="731" height="644" alt="Screenshot 2026-11-21 075719" src="https://github.com/user-attachments/assets/1b54be6a-1b11-43cf-b8da-9b951aea76a7" />
+
 ## Features
 
-- Reads up to 100 recently completed books from a public Goodreads Custom Widget
+- Reads up to 100 recently completed books from a public Goodreads Custom Widget (since RSS was depreciated in October 2026)
 - Does not require Goodreads credentials, cookies, or an authenticated browser session
 - Stores book and reading data in SQLite
 - Caches cover images locally
